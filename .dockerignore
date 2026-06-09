@@ -1,0 +1,9 @@
+# Не копируем в образ лишнее и секреты
+.venv/
+.git/
+.idea/
+__pycache__/
+*.py[oc]
+.env
+.dockerignore
+README.md
