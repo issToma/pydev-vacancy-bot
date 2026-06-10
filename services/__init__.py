@@ -1,0 +1,1 @@
+# services — сервисы-плагины, каждый реализует core.contracts.ServiceModule
