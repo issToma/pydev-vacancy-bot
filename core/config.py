@@ -16,5 +16,9 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str
 
+    # Подключение к PostgreSQL. Дефолт — локальный compose-postgres (хост-порт 5433).
+    # В docker значение переопределяется через env DATABASE_URL (хост = postgres:5432).
+    database_url: str = "postgresql+asyncpg://vacancy:vacancy@localhost:5433/vacancy"
+
 
 settings = Settings()

@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+import datetime
+
+from sqlalchemy import ARRAY, DateTime, String, Text, text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from core.db import Base
+
+
+class VacancyScraped(Base):
+    """Вакансия, собранная скрейпером (таблица vacancies_scraped).
+
+    id — идентификатор вакансии с hh (не автоинкремент).
+    Поля status/apply_flag — рабочие поля приложения; скрейпер их не перезаписывает.
+    """
+
+    __tablename__ = "vacancies_scraped"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    name: Mapped[str] = mapped_column(String(256))
+    area: Mapped[str] = mapped_column(String(256))
+    salary_min: Mapped[int | None]
+    salary_max: Mapped[int | None]
+    currency: Mapped[str | None] = mapped_column(String(8))
+    address: Mapped[str | None] = mapped_column(String(256))
+    published_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))
+    url: Mapped[str] = mapped_column(String(256))
+    apply_alternate_url: Mapped[str] = mapped_column(String(256))
+    employer: Mapped[str] = mapped_column(String(256))
+    accredited_it_employer: Mapped[bool | None]
+    work_format: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    professional_role: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    experience: Mapped[str] = mapped_column(String(256))
+    employment_format: Mapped[str | None] = mapped_column(String(256))
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    description: Mapped[str | None] = mapped_column(Text)
+    description_key_words: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    has_test: Mapped[bool | None]
+    key_skills: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    languages: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    status: Mapped[str] = mapped_column(String(16), server_default=text("'new'"))
+    archived: Mapped[bool | None]
+    apply_flag: Mapped[bool | None] = mapped_column(server_default=text("false"))
