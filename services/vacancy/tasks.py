@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from core.celery_app import celery_app
 from core.config import settings
 from services.vacancy.models import VacancyScraped
+from services.vacancy.notifications import publish_notifications
 from services.vacancy.scraper.hh_scraper import scrape_new_vacancies
+from services.vacancy.subs import list_active_subscriptions, subscription_matches
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +52,32 @@ async def _run() -> int:
 
     saved = 0
 
+    # активные подписки грузим один раз — матчим против них новые вакансии
+    async with session_factory() as session:
+        existing_ids = set((await session.execute(select(VacancyScraped.id))).scalars().all())
+        subscriptions = await list_active_subscriptions(session)
+    logger.info("Уже в БД: %s вакансий, активных подписок: %s", len(existing_ids), len(subscriptions))
+
     async def on_batch(batch: list[dict]) -> None:
         nonlocal saved
         await _upsert_batch(session_factory, batch)
         saved += len(batch)
 
-    try:
-        # id уже сохранённых — чтобы не открывать их детальные страницы повторно
-        async with session_factory() as session:
-            existing_ids = set((await session.execute(select(VacancyScraped.id))).scalars().all())
-        logger.info("Уже в БД: %s вакансий", len(existing_ids))
+        # уведомления только по НОВЫМ вакансиям (id не было в БД до запуска)
+        notifications = []
+        for vacancy in batch:
+            if vacancy["id"] in existing_ids:
+                continue
+            for sub in subscriptions:
+                if subscription_matches(sub.filter, vacancy):
+                    notifications.append({
+                        "user_id": sub.user_id,
+                        "text": f"Новая вакансия по подписке «{sub.filter.get('text', '')}»:\n"
+                                f"{vacancy['name']}\n{vacancy['url']}",
+                    })
+        await publish_notifications(notifications)
 
+    try:
         await scrape_new_vacancies(existing_ids, on_batch=on_batch)
     finally:
         await engine.dispose()

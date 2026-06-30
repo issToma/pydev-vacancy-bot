@@ -6,6 +6,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +27,12 @@ from services.vacancy.subs import (
 )
 
 STACK_CACHE_KEY = "cache:stack"
+
+
+class SubscriptionIn(BaseModel):
+    user_id: int
+    text: str
+    username: str | None = None
 
 
 async def get_stack(session: AsyncSession, redis: Redis) -> list[dict]:
@@ -145,5 +152,22 @@ class VacancyService:
             redis: Redis = Depends(get_redis),
         ) -> list[dict]:
             return await get_stack(session, redis)
+
+        @router.post("/subscriptions")
+        async def create_sub(
+            body: SubscriptionIn,
+            session: AsyncSession = Depends(get_session),
+        ) -> dict:
+            await upsert_user(session, body.user_id, body.username)
+            sub = await create_subscription(session, body.user_id, {"text": body.text})
+            await session.commit()
+            return {"id": sub.id, "user_id": body.user_id, "filter": sub.filter}
+
+        @router.get("/subscriptions/{user_id}")
+        async def list_subs(
+            user_id: int, session: AsyncSession = Depends(get_session)
+        ) -> list[dict]:
+            subs = await list_user_subscriptions(session, user_id)
+            return [{"id": s.id, "filter": s.filter} for s in subs]
 
         return router

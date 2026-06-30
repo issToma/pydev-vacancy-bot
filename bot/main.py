@@ -10,6 +10,7 @@ from bot.middlewares import InfraMiddleware
 from bot.registry import SERVICES, validate_registry
 from core.config import settings
 from core.infra import build_infra
+from services.vacancy.notifications import run_notifier
 
 logging.basicConfig(level=logging.INFO)
 
@@ -50,8 +51,19 @@ def build_dispatcher() -> Dispatcher:
 async def main() -> None:
     bot = Bot(token=settings.telegram_bot_token)
     dp = build_dispatcher()
+
+    # Прямой RabbitMQ-consumer уведомлений — фоновой задачей внутри бота.
+    # Доставка идёт через bot.send_message; ошибки → DLQ (см. notifications.py).
+    async def send(user_id: int, text: str) -> None:
+        await bot.send_message(user_id, text, disable_web_page_preview=True)
+
+    notifier_task = asyncio.create_task(run_notifier(send))
+
     logging.info("Бот запускается (long polling)...")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        notifier_task.cancel()
 
 
 if __name__ == "__main__":
