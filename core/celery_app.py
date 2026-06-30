@@ -13,6 +13,9 @@ celery_app = Celery(
     "vacancy_bot",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
+    # include — модули с задачами, которые воркер импортирует при старте,
+    # чтобы зарегистрировать их в реестре задач.
+    include=["services.vacancy.tasks"],
 )
 
 # Базовая конфигурация.
@@ -22,11 +25,12 @@ celery_app.conf.update(
     timezone="UTC",
 )
 
-
-@celery_app.task
-def add(x: int, y: int) -> int:
-    """Демо-задача: проверяем сквозной пайплайн producer → RabbitMQ → worker → Redis.
-
-    На подшаге 3 заменим её на реальную scrape_vacancies.
-    """
-    return x + y
+# Расписание Beat: периодически запускать скрапинг вакансий.
+# Beat — отдельный процесс-планировщик; он лишь КЛАДЁТ задачу в брокер по
+# расписанию, а исполняет её обычный воркер. Интервал задаётся в секундах.
+celery_app.conf.beat_schedule = {
+    "scrape-vacancies-periodic": {
+        "task": "services.vacancy.tasks.scrape_vacancies",
+        "schedule": 6 * 60 * 60,    # каждые 6 часов
+    },
+}
