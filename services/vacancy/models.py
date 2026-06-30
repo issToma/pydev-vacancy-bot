@@ -44,3 +44,15 @@ class VacancyScraped(Base):
     status: Mapped[str] = mapped_column(String(16), server_default=text("'new'"))
     archived: Mapped[bool | None]
     apply_flag: Mapped[bool | None] = mapped_column(server_default=text("false"))
+
+
+class RuArea(Base):
+    """Справочник названий регионов/городов РФ (поддерево России из hh /areas).
+
+    Нужен для фильтра РФ/зарубеж: в vacancies_scraped есть только город (area),
+    страны нет — принадлежность к РФ определяем по вхождению area в этот справочник.
+    """
+
+    __tablename__ = "ru_areas"
+
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
