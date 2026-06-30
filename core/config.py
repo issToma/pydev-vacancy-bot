@@ -33,5 +33,9 @@ class Settings(BaseSettings):
     # RabbitMQ для прямых уведомлений (aio-pika producer/consumer).
     rabbitmq_url: str = "amqp://vacancy:vacancy@localhost:5672/"
 
+    # Rate-limit команд бота: не более N сообщений за окно (сек) на пользователя.
+    rate_limit_messages: int = 20
+    rate_limit_window: int = 60
+
 
 settings = Settings()

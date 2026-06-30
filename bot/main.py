@@ -6,7 +6,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 
 from bot.help import build_help_router
-from bot.middlewares import InfraMiddleware
+from bot.middlewares import InfraMiddleware, RateLimitMiddleware
 from bot.registry import SERVICES, validate_registry
 from core.config import settings
 from core.infra import build_infra
@@ -33,6 +33,14 @@ def build_dispatcher() -> Dispatcher:
     infra = build_infra()
 
     dp = Dispatcher()
+    # rate-limit раньше всего (отсекаем спам до полезной работы), затем DI infra
+    dp.message.middleware(
+        RateLimitMiddleware(
+            infra.redis,
+            infra.settings.rate_limit_messages,
+            infra.settings.rate_limit_window,
+        )
+    )
     # DI: infra доступна во всех хендлерах через data["infra"]
     dp.message.middleware(InfraMiddleware(infra))
 
