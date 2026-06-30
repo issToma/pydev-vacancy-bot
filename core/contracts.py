@@ -24,6 +24,7 @@ class Infra(Protocol):
     settings: Settings
     session_factory: async_sessionmaker
     redis: Redis
+    s3: object          # модуль core.s3 (put_object/get_object/ensure_buckets)
 
 
 class ServiceModule(Protocol):

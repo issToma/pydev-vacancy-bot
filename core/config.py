@@ -37,5 +37,12 @@ class Settings(BaseSettings):
     rate_limit_messages: int = 20
     rate_limit_window: int = 60
 
+    # MinIO / S3 (объектное хранилище для Dewarp). В docker endpoint = http://minio:9000.
+    s3_endpoint_url: str = "http://localhost:9000"
+    s3_access_key: str = "vacancy"
+    s3_secret_key: str = "vacancy123"
+    s3_bucket_input: str = "dewarp-input"
+    s3_bucket_output: str = "dewarp-output"
+
 
 settings = Settings()
