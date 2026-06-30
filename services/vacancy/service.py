@@ -19,6 +19,11 @@ from services.vacancy.repo import (
     search_vacancies,
     top_technologies,
 )
+from services.vacancy.subs import (
+    create_subscription,
+    list_user_subscriptions,
+    upsert_user,
+)
 
 STACK_CACHE_KEY = "cache:stack"
 
@@ -52,13 +57,15 @@ class VacancyService:
     """Vacancy Radar: поиск вакансий (REST + команда бота)."""
 
     name = "vacancy"
-    commands = ["/vacancies", "/stack"]
+    commands = ["/vacancies", "/stack", "/subscribe", "/subscriptions"]
     help_text = (
         "/vacancies [запрос] — поиск вакансий по разработке.\n"
         "  Запрос (необязательно) ищется в названии вакансии; "
         "без него — последние вакансии.\n"
         "  Пример: /vacancies senior python\n"
-        "/stack — топ востребованных технологий в dev-вакансиях"
+        "/stack — топ востребованных технологий в dev-вакансиях\n"
+        "/subscribe <запрос> — подписаться на новые вакансии по запросу\n"
+        "/subscriptions — мои подписки"
     )
 
     def register(self, router: Router, infra: Infra) -> None:
@@ -79,6 +86,32 @@ class VacancyService:
             top = rows[:20]
             lines = [f"{r['pct']}% — {r['technology']}" for r in top]
             await message.answer("Топ технологий (dev-вакансии):\n\n" + "\n".join(lines))
+
+        @router.message(Command("subscribe"))
+        async def subscribe(message: Message) -> None:
+            query = message.text.partition(" ")[2].strip()
+            if not query:
+                await message.answer("Укажи запрос: /subscribe python")
+                return
+            async with infra.session_factory() as session:
+                await upsert_user(
+                    session, message.from_user.id, message.from_user.username
+                )
+                await create_subscription(
+                    session, message.from_user.id, {"text": query}
+                )
+                await session.commit()
+            await message.answer(f"Подписка создана: «{query}». Пришлю новые подходящие вакансии.")
+
+        @router.message(Command("subscriptions"))
+        async def subscriptions(message: Message) -> None:
+            async with infra.session_factory() as session:
+                subs = await list_user_subscriptions(session, message.from_user.id)
+            if not subs:
+                await message.answer("У тебя нет активных подписок. Создай: /subscribe python")
+                return
+            lines = [f"• {s.filter.get('text', '(любые)')}" for s in subs]
+            await message.answer("Твои подписки:\n\n" + "\n".join(lines))
 
     def api_router(self) -> APIRouter:
         router = APIRouter()

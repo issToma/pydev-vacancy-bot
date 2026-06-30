@@ -20,7 +20,8 @@ if config.config_file_name is not None:
 # Импорт моделей регистрирует их таблицы в Base.metadata — нужно для autogenerate.
 from core.config import settings
 from core.db import Base
-from services.vacancy import models  # noqa: F401
+from core import models  # noqa: F401  (users, subscriptions)
+from services.vacancy import models as vacancy_models  # noqa: F401
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
 target_metadata = Base.metadata

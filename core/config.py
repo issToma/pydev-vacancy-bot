@@ -30,5 +30,8 @@ class Settings(BaseSettings):
     # TTL кэша топа технологий, секунды.
     stack_cache_ttl: int = 3600
 
+    # RabbitMQ для прямых уведомлений (aio-pika producer/consumer).
+    rabbitmq_url: str = "amqp://vacancy:vacancy@localhost:5672/"
+
 
 settings = Settings()
