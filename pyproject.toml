@@ -8,6 +8,7 @@ dependencies = [
     "aiogram>=3.28.2",
     "alembic>=1.18.4",
     "asyncpg>=0.31.0",
+    "celery[redis]>=5.6.3",
     "fastapi>=0.136.3",
     "pydantic-settings>=2.14.1",
     "sqlalchemy[asyncio]>=2.0.50",

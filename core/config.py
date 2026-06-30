@@ -20,5 +20,10 @@ class Settings(BaseSettings):
     # В docker значение переопределяется через env DATABASE_URL (хост = postgres:5432).
     database_url: str = "postgresql+asyncpg://vacancy:vacancy@localhost:5433/vacancy"
 
+    # Celery: брокер задач — RabbitMQ (amqp), backend результатов — Redis.
+    # В docker хосты переопределяются на rabbitmq / redis.
+    celery_broker_url: str = "amqp://vacancy:vacancy@localhost:5672//"
+    celery_result_backend: str = "redis://localhost:6379/0"
+
 
 settings = Settings()
