@@ -29,7 +29,7 @@ def validate_registry(services: list[ServiceModule]) -> None:
     if duplicate_names:
         raise ValueError(f"Дублируются имена сервисов: {duplicate_names}")
 
-    all_commands = (cmd for s in services for cmd in s.commands)
+    all_commands = (cmd.command for s in services for cmd in s.commands)
     duplicate_commands = _duplicates(all_commands)
     if duplicate_commands:
         raise ValueError(f"Команды используются более чем одним сервисом: {duplicate_commands}")

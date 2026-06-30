@@ -4,7 +4,7 @@ import json
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import BotCommand, Message
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -20,6 +20,7 @@ from services.vacancy.repo import (
     search_vacancies,
     top_technologies,
 )
+from services.vacancy.filters_ui import register_filter_dialog
 from services.vacancy.subs import (
     create_subscription,
     list_user_subscriptions,
@@ -64,18 +65,27 @@ class VacancyService:
     """Vacancy Radar: поиск вакансий (REST + команда бота)."""
 
     name = "vacancy"
-    commands = ["/vacancies", "/stack", "/subscribe", "/subscriptions"]
+    commands = [
+        BotCommand(command="vacancies", description="поиск вакансий по разработке"),
+        BotCommand(command="filter", description="подбор фильтров кнопками"),
+        BotCommand(command="stack", description="топ востребованных технологий"),
+        BotCommand(command="subscribe", description="подписка на новые вакансии"),
+        BotCommand(command="subscriptions", description="мои подписки"),
+    ]
     help_text = (
         "/vacancies [запрос] — поиск вакансий по разработке.\n"
         "  Запрос (необязательно) ищется в названии вакансии; "
         "без него — последние вакансии.\n"
         "  Пример: /vacancies senior python\n"
+        "/filter — подобрать фильтры кнопками (регион/формат/аккредитация)\n"
         "/stack — топ востребованных технологий в dev-вакансиях\n"
         "/subscribe <запрос> — подписаться на новые вакансии по запросу\n"
         "/subscriptions — мои подписки"
     )
 
     def register(self, router: Router, infra: Infra) -> None:
+        register_filter_dialog(router, infra)
+
         @router.message(Command("vacancies"))
         async def vacancies(message: Message) -> None:
             # текст после команды → поисковый запрос по названию

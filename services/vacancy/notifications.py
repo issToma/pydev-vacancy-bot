@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
+
+import aio_pika.abc
 
 import aio_pika
 from aio_pika import DeliveryMode, ExchangeType, Message
@@ -60,16 +64,29 @@ async def run_notifier(send: Callable[[int, str], Awaitable[None]]) -> None:
     отклоняется без requeue → уходит в DLQ (не теряется, не зацикливается).
     `send(user_id, text)` — обычно bot.send_message.
     """
-    connection = await aio_pika.connect_robust(settings.rabbitmq_url)
-    channel = await connection.channel()
-    await channel.set_qos(prefetch_count=10)
-    queue = await _declare_topology(channel)
-
-    logger.info("Notifier запущен, слушаю очередь %s", NOTIFICATIONS_QUEUE)
-    async with queue.iterator() as it:
-        async for message in it:
-            # process(requeue=False): ack при успехе; при исключении — nack без
-            # requeue → сообщение dead-letter'ится в DLQ.
+    async def on_message(message: aio_pika.abc.AbstractIncomingMessage) -> None:
+        # process(requeue=False): ack при успехе; при исключении — nack без
+        # requeue → сообщение dead-letter'ится в DLQ. process() пробрасывает
+        # исключение дальше — ловим, чтобы не засорять лог «never retrieved».
+        try:
             async with message.process(requeue=False):
                 payload = json.loads(message.body)
                 await send(payload["user_id"], payload["text"])
+        except Exception:
+            logger.warning("Доставка не удалась, сообщение → DLQ", exc_info=True)
+
+    connection = await aio_pika.connect_robust(settings.rabbitmq_url)
+    try:
+        channel = await connection.channel()
+        await channel.set_qos(prefetch_count=10)
+        queue = await _declare_topology(channel)
+        await queue.consume(on_message)
+        logger.info("Notifier запущен, слушаю очередь %s", NOTIFICATIONS_QUEUE)
+        await asyncio.Future()      # ждём до отмены задачи (остановка бота)
+    except asyncio.CancelledError:
+        pass                        # штатная остановка
+    finally:
+        # закрываем соединение — сервер сам снимет потребителей; остаточные
+        # ошибки teardown подавляем (канал уже мог закрыться).
+        with contextlib.suppress(Exception):
+            await connection.close()

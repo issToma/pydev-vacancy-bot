@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import BotCommand, Message
 
 from core.contracts import Infra
 
@@ -15,7 +15,7 @@ class PingService:
     """
 
     name = "ping"
-    commands = ["/ping"]
+    commands = [BotCommand(command="ping", description="проверка живости бота")]
     help_text = "/ping — проверка живости бота"
 
     def register(self, router: Router, infra: Infra) -> None:

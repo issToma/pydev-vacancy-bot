@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from aiogram import Router
+from aiogram.types import BotCommand
 
 if TYPE_CHECKING:
     from fastapi import APIRouter
@@ -34,7 +35,7 @@ class ServiceModule(Protocol):
     """
 
     name: str
-    commands: list[str]
+    commands: list[BotCommand]   # команды сервиса с описаниями (для меню Telegram)
     help_text: str
 
     def register(self, router: Router, infra: Infra) -> None:

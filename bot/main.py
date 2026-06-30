@@ -3,6 +3,7 @@ import logging
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import CommandStart
+from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import Message
 
 from bot.help import build_help_router
@@ -32,7 +33,8 @@ def build_dispatcher() -> Dispatcher:
     validate_registry(SERVICES)          # инвариант: уникальные name/команды
     infra = build_infra()
 
-    dp = Dispatcher()
+    # FSM-состояние диалогов — в Redis (переживает перезапуск бота)
+    dp = Dispatcher(storage=RedisStorage.from_url(infra.settings.redis_url))
     # rate-limit раньше всего (отсекаем спам до полезной работы), затем DI infra
     dp.message.middleware(
         RateLimitMiddleware(
@@ -59,6 +61,10 @@ def build_dispatcher() -> Dispatcher:
 async def main() -> None:
     bot = Bot(token=settings.telegram_bot_token)
     dp = build_dispatcher()
+
+    # Меню команд Telegram («Menu» у поля ввода) — собираем из реестра сервисов.
+    menu = [cmd for service in SERVICES for cmd in service.commands]
+    await bot.set_my_commands(menu)
 
     # Прямой RabbitMQ-consumer уведомлений — фоновой задачей внутри бота.
     # Доставка идёт через bot.send_message; ошибки → DLQ (см. notifications.py).
