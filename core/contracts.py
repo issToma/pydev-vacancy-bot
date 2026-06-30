@@ -6,6 +6,7 @@ from aiogram import Router
 
 if TYPE_CHECKING:
     from fastapi import APIRouter
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from core.config import Settings
@@ -14,13 +15,14 @@ if TYPE_CHECKING:
 class Infra(Protocol):
     """Общая инфраструктура, которую ядро выдаёт каждому сервису (Dependency Injection).
 
-    По мере добавления инфраструктуры (Redis, Celery, S3, Claude)
+    По мере добавления инфраструктуры (Celery, S3, Claude)
     расширяем этот протокол — сервисы берут зависимости отсюда,
     а не импортируют глобально.
     """
 
     settings: Settings
     session_factory: async_sessionmaker
+    redis: Redis
 
 
 class ServiceModule(Protocol):

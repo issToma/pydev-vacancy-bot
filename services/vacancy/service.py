@@ -1,14 +1,41 @@
 from __future__ import annotations
 
+import json
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from fastapi import APIRouter, Depends
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import settings
 from core.contracts import Infra
 from core.db import get_session
-from services.vacancy.repo import VacancyFilters, VacancyRow, search_vacancies
+from core.redis import get_redis
+from services.vacancy.repo import (
+    VacancyFilters,
+    VacancyRow,
+    search_vacancies,
+    top_technologies,
+)
+
+STACK_CACHE_KEY = "cache:stack"
+
+
+async def get_stack(session: AsyncSession, redis: Redis) -> list[dict]:
+    """Топ технологий с кэшированием в Redis (cache-aside).
+
+    Сначала пробуем взять из кэша; промах → считаем из БД, кладём в кэш с TTL.
+    """
+    cached = await redis.get(STACK_CACHE_KEY)
+    if cached is not None:
+        return json.loads(cached)
+
+    stats = await top_technologies(session)
+    payload = [vars(s) for s in stats]
+    await redis.set(STACK_CACHE_KEY, json.dumps(payload), ex=settings.stack_cache_ttl)
+    return payload
 
 
 def _format_vacancies(rows: list[VacancyRow]) -> str:
@@ -25,12 +52,13 @@ class VacancyService:
     """Vacancy Radar: поиск вакансий (REST + команда бота)."""
 
     name = "vacancy"
-    commands = ["/vacancies"]
+    commands = ["/vacancies", "/stack"]
     help_text = (
         "/vacancies [запрос] — поиск вакансий по разработке.\n"
         "  Запрос (необязательно) ищется в названии вакансии; "
         "без него — последние вакансии.\n"
-        "  Пример: /vacancies senior python"
+        "  Пример: /vacancies senior python\n"
+        "/stack — топ востребованных технологий в dev-вакансиях"
     )
 
     def register(self, router: Router, infra: Infra) -> None:
@@ -43,6 +71,14 @@ class VacancyService:
                     session, VacancyFilters(text=query, limit=10)
                 )
             await message.answer(_format_vacancies(rows), disable_web_page_preview=True)
+
+        @router.message(Command("stack"))
+        async def stack(message: Message) -> None:
+            async with infra.session_factory() as session:
+                rows = await get_stack(session, infra.redis)
+            top = rows[:20]
+            lines = [f"{r['pct']}% — {r['technology']}" for r in top]
+            await message.answer("Топ технологий (dev-вакансии):\n\n" + "\n".join(lines))
 
     def api_router(self) -> APIRouter:
         router = APIRouter()
@@ -69,5 +105,12 @@ class VacancyService:
                 ),
             )
             return [vars(r) for r in rows]
+
+        @router.get("/stack")
+        async def stack(
+            session: AsyncSession = Depends(get_session),
+            redis: Redis = Depends(get_redis),
+        ) -> list[dict]:
+            return await get_stack(session, redis)
 
         return router

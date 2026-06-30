@@ -25,5 +25,10 @@ class Settings(BaseSettings):
     celery_broker_url: str = "amqp://vacancy:vacancy@localhost:5672//"
     celery_result_backend: str = "redis://localhost:6379/0"
 
+    # Redis для приложения (кэш, далее — rate-limit, FSM, память диалога).
+    redis_url: str = "redis://localhost:6379/1"
+    # TTL кэша топа технологий, секунды.
+    stack_cache_ttl: int = 3600
+
 
 settings = Settings()

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from services.vacancy.normalize import normalize
 
 
 @dataclass(frozen=True)
@@ -73,3 +76,43 @@ async def search_vacancies(session: AsyncSession, f: VacancyFilters) -> list[Vac
     )
     rows = (await session.execute(sql, params)).all()
     return [VacancyRow(*r) for r in rows]
+
+
+@dataclass(frozen=True)
+class TechStat:
+    technology: str
+    vacancy_count: int
+    pct: float
+
+
+async def top_technologies(session: AsyncSession, min_pct: float = 0.5) -> list[TechStat]:
+    """Топ технологий по dev-вакансиям.
+
+    Для каждой вакансии берём объединение description_key_words + key_skills,
+    нормализуем и дедуплицируем (технология считается раз на вакансию — это
+    «доля вакансий, где она встречается», а не суммарные упоминания).
+    pct = доля dev-вакансий; отсекаем шум ниже min_pct.
+    """
+    rows = (
+        await session.execute(
+            text("SELECT description_key_words, key_skills FROM dev_vacancies")
+        )
+    ).all()
+    total = len(rows)
+    if total == 0:
+        return []
+
+    counter: Counter[str] = Counter()
+    for description_key_words, key_skills in rows:
+        techs = set()
+        for raw in (description_key_words or []) + (key_skills or []):
+            canonical = normalize(raw)
+            if canonical:
+                techs.add(canonical)
+        counter.update(techs)
+
+    stats = [
+        TechStat(tech, count, round(100 * count / total, 1))
+        for tech, count in counter.most_common()
+    ]
+    return [s for s in stats if s.pct >= min_pct]
