@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import BufferedInputFile, Message
@@ -13,6 +14,7 @@ from bot.middlewares import FlowStateGuardMiddleware, InfraMiddleware, RateLimit
 from bot.registry import SERVICES, validate_registry
 from core.config import settings
 from core.infra import build_infra
+from core.tg_html import HTML_SOURCE_LIMIT, TELEGRAM_TEXT_LIMIT, to_telegram_html
 from services.dewarp.service import build_result_kb
 from services.vacancy.notifications import run_notifier
 
@@ -86,7 +88,17 @@ async def main() -> None:
                 reply_markup=build_result_kb(payload["photo_key"]),
             )
         else:
-            await bot.send_message(user_id, payload["text"], disable_web_page_preview=True)
+            text = payload["text"]
+            # рендерим Markdown→Telegram-HTML (для /match и т.п.); при сбое парсинга — plain
+            try:
+                await bot.send_message(
+                    user_id, to_telegram_html(text[:HTML_SOURCE_LIMIT]),
+                    parse_mode="HTML", disable_web_page_preview=True,
+                )
+            except TelegramBadRequest:
+                await bot.send_message(
+                    user_id, text[:TELEGRAM_TEXT_LIMIT], disable_web_page_preview=True
+                )
 
     notifier_task = asyncio.create_task(run_notifier(deliver))
 

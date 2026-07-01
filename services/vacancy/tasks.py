@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from core.celery_app import celery_app
 from core.config import settings
 from core.models import Job, LlmUsage
-from services.vacancy.match import extract_stack, prefilter_candidates, rank_with_llm
+from services.vacancy.match import extract_area, extract_stack, prefilter_candidates, rank_with_llm
 from services.vacancy.models import VacancyScraped
 from services.vacancy.notifications import publish_notifications
 from services.vacancy.scraper.hh_scraper import scrape_new_vacancies
@@ -136,11 +136,14 @@ async def _run_match(user_id: int, resume: str) -> str:
             await session.commit()
 
         try:
-            # 1) дешёвый предфильтр кандидатов по стеку из резюме
+            # 1) дешёвый предфильтр кандидатов по стеку (+ городу, если упомянут) из резюме
             stack = extract_stack(resume)
             async with session_factory() as session:
-                candidates = await prefilter_candidates(session, stack, settings.match_candidates_limit)
-            logger.info("match: стек=%s, кандидатов=%s", stack[:10], len(candidates))
+                area = await extract_area(session, resume)
+                candidates = await prefilter_candidates(
+                    session, stack, settings.match_candidates_limit, area=area
+                )
+            logger.info("match: стек=%s, город=%s, кандидатов=%s", stack[:10], area, len(candidates))
 
             # 2) LLM ранжирует ТОЛЬКО кандидатов (не всю базу)
             if candidates:

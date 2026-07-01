@@ -20,21 +20,41 @@ MATCH_SYSTEM_PROMPT = (
 )
 
 
-async def prefilter_candidates(session: AsyncSession, technologies: list[str], limit: int) -> list[dict]:
+async def extract_area(session: AsyncSession, resume: str) -> str | None:
+    """Найти в тексте упоминание города/региона, сверяя с реальными area из dev_vacancies.
+
+    Берём только существующие в данных значения (иначе фильтр ничего не найдёт).
+    При нескольких совпадениях — самое длинное (точнее, напр. «Санкт-Петербург»).
+    """
+    low = resume.lower()
+    rows = (await session.execute(
+        text("SELECT DISTINCT area FROM dev_vacancies WHERE area IS NOT NULL")
+    )).scalars().all()
+    matches = [a for a in rows if a and a.lower() in low]
+    return max(matches, key=len) if matches else None
+
+
+async def prefilter_candidates(
+    session: AsyncSession, technologies: list[str], limit: int, area: str | None = None
+) -> list[dict]:
     """Дешёвый SQL-предфильтр кандидатов из dev_vacancies.
 
-    Если из резюме извлечён стек — берём вакансии, чьи навыки/ключевые слова с ним
-    пересекаются (&&); иначе — просто свежие. В LLM уходят ТОЛЬКО эти кандидаты
-    (не вся база) — так контролируем контекст и стоимость.
+    Условия (AND): пересечение стека (&&) и/или город (ILIKE). Если ничего не
+    задано — просто свежие. В LLM уходят ТОЛЬКО эти кандидаты (не вся база) —
+    так контролируем контекст и стоимость.
     """
+    conds: list[str] = []
     params: dict = {"limit": limit}
-    where = ""
     if technologies:
-        where = (
-            "WHERE (COALESCE(description_key_words, CAST('{}' AS text[])) "
-            "|| COALESCE(key_skills, CAST('{}' AS text[]))) && CAST(:techs AS text[]) "
+        conds.append(
+            "(COALESCE(description_key_words, CAST('{}' AS text[])) "
+            "|| COALESCE(key_skills, CAST('{}' AS text[]))) && CAST(:techs AS text[])"
         )
         params["techs"] = technologies
+    if area:
+        conds.append("area ILIKE :area")
+        params["area"] = f"%{area}%"
+    where = ("WHERE " + " AND ".join(conds) + " ") if conds else ""
     sql = text(
         "SELECT id, name, employer, area, experience, "
         "COALESCE(key_skills, CAST('{}' AS text[])) AS key_skills, "
