@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from sqlalchemy import BigInteger, ForeignKey, Text, text
+from sqlalchemy import BigInteger, ForeignKey, Integer, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -56,3 +56,20 @@ class Job(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         server_default=text("now()"), onupdate=datetime.datetime.utcnow
     )
+
+
+class LlmUsage(Base):
+    """Учёт расхода LLM (cost-control): токены на пользователя/сервис.
+
+    user_id — без FK (как в jobs): пишем расход, даже если юзера ещё нет в users.
+    """
+
+    __tablename__ = "llm_usage"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    service: Mapped[str] = mapped_column(Text)              # "ask" | "match"
+    model: Mapped[str] = mapped_column(Text)                # какая модель отвечала
+    tokens_in: Mapped[int] = mapped_column(Integer)
+    tokens_out: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=text("now()"))
