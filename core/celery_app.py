@@ -31,6 +31,8 @@ celery_app.conf.update(
 celery_app.conf.beat_schedule = {
     "scrape-vacancies-periodic": {
         "task": "services.vacancy.tasks.scrape_vacancies",
-        "schedule": 6 * 60 * 60,    # каждые 6 часов
+        "schedule": 5 * 60,                 # каждые 5 минут
+        # если задача провисела в очереди дольше интервала — выбросить (не копить backlog)
+        "options": {"expires": 5 * 60},
     },
 }

@@ -114,6 +114,26 @@ async def _goto_and_get_state(page: Page, url: str) -> dict | None:
     return None
 
 
+# Типы ресурсов, которые не нужны для чтения встроенного <template> с JSON.
+# Блокируем их — резко экономим память браузера и трафик (рендер картинок/CSS не нужен).
+_BLOCKED_RESOURCES = {"image", "media", "font", "stylesheet"}
+
+
+async def _block_heavy(route) -> None:
+    if route.request.resource_type in _BLOCKED_RESOURCES:
+        await route.abort()
+    else:
+        await route.continue_()
+
+
+async def _make_context(browser) -> tuple[BrowserContext, Page]:
+    """Свежий контекст с блокировкой тяжёлых ресурсов + страница в нём."""
+    context = await browser.new_context(locale="ru-RU")
+    await context.route("**/*", _block_heavy)
+    page = await context.new_page()
+    return context, page
+
+
 async def _load_role_map(context: BrowserContext) -> dict:
     """Справочник профессиональных ролей id→название (через контекст браузера)."""
     try:
@@ -212,19 +232,19 @@ def parse_detail(state: dict, role_map: dict) -> dict | None:
     }
 
 
-async def scrape_new_vacancies(existing_ids: set, on_batch=None) -> list[dict]:
+async def scrape_new_vacancies(existing_ids: set, on_batch=None) -> int:
     """Открывает hh.ru, обходит страницы выдачи, по новым вакансиям заходит
     на детальную страницу и собирает полные данные (схема vacancies_scraped).
 
-    Если передан on_batch (async-колбэк), собранное сбрасывается порциями по
-    config.BATCH_SIZE прямо по ходу — прерывание не теряет уже собранное."""
-    collected: list[dict] = []
+    Собранное НЕ держим в памяти целиком: детали сразу уходят в БД порциями по
+    config.BATCH_SIZE через on_batch (async-колбэк). Возвращает число собранных
+    вакансий (счётчик, не сами данные)."""
+    collected_count = 0
     buffer: list[dict] = []
 
     async with async_playwright() as p:
         browser = await p.firefox.launch(headless=config.HEADLESS)
-        context = await browser.new_context(locale="ru-RU")
-        page = await context.new_page()
+        context, page = await _make_context(browser)
 
         role_map = await _load_role_map(context)
 
@@ -246,22 +266,32 @@ async def scrape_new_vacancies(existing_ids: set, on_batch=None) -> list[dict]:
         new_items = [(vid, url) for vid, url in listed if vid not in existing_ids]
         logger.info("Собрано %s вакансий, новых %s", len(listed), len(new_items))
 
-        # 3) По каждой новой заходим на детальную страницу (с прогресс-баром)
-        bar = tqdm(new_items, desc="Сбор вакансий", unit="вак", dynamic_ncols=True)
-        for vid, url in bar:
+        # 3) По каждой новой заходим на детальную страницу.
+        # disable=None → tqdm-бар только в настоящем TTY; в логах воркера (не-TTY)
+        # он молчит, чтобы не спамить строками. Прогресс туда пишем логом отдельно.
+        total = len(new_items)
+        bar = tqdm(new_items, desc="Сбор вакансий", unit="вак", dynamic_ncols=True, disable=None)
+        for i, (vid, url) in enumerate(bar):
+            # периодически пересоздаём контекст — освобождаем накопленную браузером память
+            if config.RECYCLE_EVERY and i and i % config.RECYCLE_EVERY == 0:
+                await context.close()
+                context, page = await _make_context(browser)
+
             state = await _goto_and_get_state(page, url)
             if not state:
                 bar.write(f"  ! {vid} — пропуск (нет данных)")
                 continue
             detail = parse_detail(state, role_map)
             if detail:
-                collected.append(detail)
+                collected_count += 1
                 buffer.append(detail)
-                bar.set_postfix_str(detail["name"][:40])
-                # инкрементальный сброс батча в БД
+                bar.set_postfix_str(detail["name"][:40], refresh=False)
+                # инкрементальный сброс батча в БД (в памяти держим максимум BATCH_SIZE)
                 if on_batch and len(buffer) >= config.BATCH_SIZE:
                     await on_batch(buffer)
                     buffer = []
+            if (i + 1) % 25 == 0:
+                logger.info("Обработано %s/%s", i + 1, total)
             await _human_delay()
         bar.close()
 
@@ -269,6 +299,7 @@ async def scrape_new_vacancies(existing_ids: set, on_batch=None) -> list[dict]:
         if on_batch and buffer:
             await on_batch(buffer)
 
+        await context.close()
         await browser.close()
 
-    return collected
+    return collected_count
