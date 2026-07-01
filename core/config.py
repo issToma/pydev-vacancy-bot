@@ -47,5 +47,30 @@ class Settings(BaseSettings):
     # Путь к весам YOLO для деварпинга (в git не коммитится, см. weights/).
     dewarp_weights_path: str = "weights/best_26_1024_150_x_full_fix.pt"
 
+    # --- Ask (Q&A с LLM) ---
+    # Провайдер-агностично: любой OpenAI-совместимый endpoint. По умолчанию —
+    # Google Gemini (бесплатный tier). Ключ — только из env/.env; пустой = /ask
+    # ответит, что не настроен. Смена провайдера (Groq/OpenAI/Claude) = 3 строки в .env.
+    llm_api_key: str = ""
+    llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    # gemini-2.5-flash — рабочая бесплатная модель (у 2.0-flash free-tier quota=0 в ряде регионов).
+    llm_model: str = "gemini-2.5-flash"
+    ask_max_tokens: int = 1024              # потолок длины ответа (контроль стоимости)
+    # «Думающие» модели (Gemini 2.5) тратят бюджет токенов на рассуждения и режут
+    # ответ. Для Q&A рассуждения не нужны → отключаем ("none"). "" = не передавать.
+    ask_reasoning_effort: str = "none"
+    ask_system_prompt: str = (
+        "Ты — ассистент по программированию в стиле StackOverflow. "
+        "Отвечай кратко и по делу: конкретный ответ на вопрос, при необходимости — "
+        "короткий пример кода. Не генерируй крупные проекты или файлы целиком. "
+        "Если вопрос неоднозначен — уточни. Отвечай на языке вопроса."
+    )
+    # Память диалога в Redis: сколько последних реплик хранить и как долго.
+    ask_dialog_max_turns: int = 6           # реплик (user+assistant) в контексте
+    ask_dialog_ttl: int = 3600              # TTL сессии диалога, секунды
+    # Отдельный, более жёсткий лимит на /ask (дорогая команда): N запросов за окно.
+    ask_rate_limit: int = 10
+    ask_rate_limit_window: int = 3600
+
 
 settings = Settings()

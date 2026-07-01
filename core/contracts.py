@@ -6,6 +6,7 @@ from aiogram import Router
 from aiogram.types import BotCommand
 
 if TYPE_CHECKING:
+    from openai import AsyncOpenAI
     from fastapi import APIRouter
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -26,6 +27,7 @@ class Infra(Protocol):
     redis: Redis
     s3: object          # модуль core.s3 (put_object/get_object/ensure_buckets)
     celery: object      # Celery-приложение (send_task для постановки задач)
+    llm: AsyncOpenAI    # OpenAI-совместимый LLM-клиент (для /ask со streaming)
 
 
 class ServiceModule(Protocol):

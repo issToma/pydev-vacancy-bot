@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Iterable
 
 from core.contracts import ServiceModule
+from services.ask.service import AskService
 from services.dewarp.service import DewarpService
 from services.ping import PingService
 from services.vacancy.service import VacancyService
@@ -13,6 +14,7 @@ SERVICES: list[ServiceModule] = [
     PingService(),
     VacancyService(),
     DewarpService(),
+    AskService(),
 ]
 
 
