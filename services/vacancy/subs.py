@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +40,16 @@ async def list_user_subscriptions(
     return list(rows)
 
 
+async def deactivate_subscription(session: AsyncSession, sub_id: int, user_id: int) -> bool:
+    """Мягко удалить подписку (is_active=false). Проверяем, что она принадлежит юзеру."""
+    sub = await session.get(Subscription, sub_id)
+    if sub is None or sub.user_id != user_id:
+        return False
+    sub.is_active = False
+    await session.commit()
+    return True
+
+
 async def list_active_subscriptions(session: AsyncSession) -> list[Subscription]:
     """Все активные подписки (для матчинга новых вакансий)."""
     rows = await session.scalars(
@@ -47,12 +59,15 @@ async def list_active_subscriptions(session: AsyncSession) -> list[Subscription]
 
 
 def subscription_matches(filter_: dict, vacancy: dict) -> bool:
-    """Простой матчинг: подходит ли вакансия под фильтр подписки.
+    """Матчинг: подходит ли вакансия под фильтр подписки.
 
-    На MVP — по подстроке текста в названии (как и поиск /vacancies).
-    Расширяемо: area/technologies/work_format и т.д.
+    По словам (AND): каждое слово из фильтра должно встречаться в названии.
+    Так «middle-python» → слова [middle, python] → ловит «Middle Python Developer»,
+    а «python» ловит «Python Developer». Расширяемо: area/technologies и т.д.
     """
     text = (filter_.get("text") or "").strip().lower()
-    if text and text not in (vacancy.get("name") or "").lower():
-        return False
-    return True
+    if not text:
+        return True
+    name = (vacancy.get("name") or "").lower()
+    tokens = [t for t in re.split(r"[^\w]+", text) if t]
+    return all(t in name for t in tokens)

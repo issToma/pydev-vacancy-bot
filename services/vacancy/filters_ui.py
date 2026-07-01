@@ -105,7 +105,9 @@ async def _run_search(callback: CallbackQuery, data: dict, infra: Infra, state: 
             ),
         )
     if rows:
-        text = "\n\n".join(f"• {v.name} — {v.employer}\n  {v.area} | {v.url}" for v in rows)
+        text = "\n\n".join(
+            f"• {v.name} — {v.employer}\n  {v.area} | https://hh.ru/vacancy/{v.id}" for v in rows
+        )
     else:
         text = "Ничего не найдено по выбранным фильтрам."
     await state.clear()

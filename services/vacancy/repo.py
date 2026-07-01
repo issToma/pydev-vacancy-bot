@@ -24,11 +24,11 @@ class VacancyFilters:
 
 @dataclass(frozen=True)
 class VacancyRow:
+    id: int
     name: str
     area: str
     employer: str
     experience: str
-    url: str
 
 
 async def search_vacancies(session: AsyncSession, f: VacancyFilters) -> list[VacancyRow]:
@@ -69,7 +69,7 @@ async def search_vacancies(session: AsyncSession, f: VacancyFilters) -> list[Vac
     params["limit"] = f.limit
 
     sql = text(
-        f"SELECT name, area, employer, experience, url "
+        f"SELECT id, name, area, employer, experience "
         f"FROM dev_vacancies{where} "
         f"ORDER BY published_at DESC NULLS LAST "
         f"LIMIT :limit"

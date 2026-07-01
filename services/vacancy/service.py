@@ -4,7 +4,14 @@ import json
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import BotCommand, Message
+from aiogram.filters.callback_data import CallbackData
+from aiogram.types import (
+    BotCommand,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -23,11 +30,28 @@ from services.vacancy.repo import (
 from services.vacancy.filters_ui import register_filter_dialog
 from services.vacancy.subs import (
     create_subscription,
+    deactivate_subscription,
     list_user_subscriptions,
     upsert_user,
 )
 
 STACK_CACHE_KEY = "cache:stack"
+
+
+class SubDelCB(CallbackData, prefix="subdel"):
+    """Кнопка удаления подписки: id — идентификатор подписки."""
+    id: int
+
+
+def _subs_keyboard(subs) -> InlineKeyboardMarkup:
+    """Клавиатура списка подписок: по кнопке 🗑 на каждую."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"🗑 {s.filter.get('text', '(любые)')}",
+            callback_data=SubDelCB(id=s.id).pack(),
+        )]
+        for s in subs
+    ])
 
 
 class SubscriptionIn(BaseModel):
@@ -55,7 +79,7 @@ def _format_vacancies(rows: list[VacancyRow]) -> str:
     if not rows:
         return "Ничего не найдено."
     lines = [
-        f"• {v.name} — {v.employer}\n  {v.area} | {v.experience}\n  {v.url}"
+        f"• {v.name} — {v.employer}\n  {v.area} | {v.experience}\n  https://hh.ru/vacancy/{v.id}"
         for v in rows
     ]
     return "\n\n".join(lines)
@@ -127,8 +151,20 @@ class VacancyService:
             if not subs:
                 await message.answer("У тебя нет активных подписок. Создай: /subscribe python")
                 return
-            lines = [f"• {s.filter.get('text', '(любые)')}" for s in subs]
-            await message.answer("Твои подписки:\n\n" + "\n".join(lines))
+            await message.answer("Твои подписки (тап 🗑 — удалить):", reply_markup=_subs_keyboard(subs))
+
+        @router.callback_query(SubDelCB.filter())
+        async def delete_sub(callback: CallbackQuery, callback_data: SubDelCB) -> None:
+            async with infra.session_factory() as session:
+                await deactivate_subscription(session, callback_data.id, callback.from_user.id)
+                subs = await list_user_subscriptions(session, callback.from_user.id)
+            if subs:
+                await callback.message.edit_text(
+                    "Твои подписки (тап 🗑 — удалить):", reply_markup=_subs_keyboard(subs)
+                )
+            else:
+                await callback.message.edit_text("Подписок больше нет.")
+            await callback.answer("Удалено")
 
     def api_router(self) -> APIRouter:
         router = APIRouter()
