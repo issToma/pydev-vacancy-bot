@@ -4,7 +4,9 @@ import logging
 from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import Message
+from aiogram.types import BufferedInputFile, Message
+
+from core import s3
 
 from bot.help import build_help_router
 from bot.middlewares import InfraMiddleware, RateLimitMiddleware
@@ -67,11 +69,21 @@ async def main() -> None:
     await bot.set_my_commands(menu)
 
     # Прямой RabbitMQ-consumer уведомлений — фоновой задачей внутри бота.
-    # Доставка идёт через bot.send_message; ошибки → DLQ (см. notifications.py).
-    async def send(user_id: int, text: str) -> None:
-        await bot.send_message(user_id, text, disable_web_page_preview=True)
+    # deliver решает, как доставить payload: текст (подписки) или фото из S3 (dewarp).
+    # Ошибки доставки → DLQ (см. notifications.py).
+    async def deliver(payload: dict) -> None:
+        user_id = payload["user_id"]
+        if payload.get("photo_key"):
+            data = await s3.get_object(payload["photo_bucket"], payload["photo_key"])
+            await bot.send_photo(
+                user_id,
+                BufferedInputFile(data, filename="dewarped.jpg"),
+                caption=payload.get("caption", ""),
+            )
+        else:
+            await bot.send_message(user_id, payload["text"], disable_web_page_preview=True)
 
-    notifier_task = asyncio.create_task(run_notifier(send))
+    notifier_task = asyncio.create_task(run_notifier(deliver))
 
     logging.info("Бот запускается (long polling)...")
     try:

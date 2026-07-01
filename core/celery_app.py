@@ -15,7 +15,7 @@ celery_app = Celery(
     backend=settings.celery_result_backend,
     # include — модули с задачами, которые воркер импортирует при старте,
     # чтобы зарегистрировать их в реестре задач.
-    include=["services.vacancy.tasks"],
+    include=["services.vacancy.tasks", "services.dewarp.tasks"],
 )
 
 # Базовая конфигурация.

@@ -44,5 +44,8 @@ class Settings(BaseSettings):
     s3_bucket_input: str = "dewarp-input"
     s3_bucket_output: str = "dewarp-output"
 
+    # Путь к весам YOLO для деварпинга (в git не коммитится, см. weights/).
+    dewarp_weights_path: str = "weights/best_26_1024_150_x_full_fix.pt"
+
 
 settings = Settings()

@@ -57,12 +57,13 @@ async def publish_notifications(payloads: list[dict]) -> None:
     logger.info("Опубликовано уведомлений: %s", len(payloads))
 
 
-async def run_notifier(send: Callable[[int, str], Awaitable[None]]) -> None:
-    """Consumer уведомлений: читает очередь и доставляет сообщения через send().
+async def run_notifier(deliver: Callable[[dict], Awaitable[None]]) -> None:
+    """Consumer уведомлений: читает очередь и доставляет полезную нагрузку через deliver().
 
     Фоновая asyncio-задача внутри бота. При ошибке доставки сообщение
     отклоняется без requeue → уходит в DLQ (не теряется, не зацикливается).
-    `send(user_id, text)` — обычно bot.send_message.
+    `deliver(payload)` решает, как доставить (текст/фото) — обычно завязан на Bot.
+    Payload — произвольный dict (как минимум с user_id).
     """
     async def on_message(message: aio_pika.abc.AbstractIncomingMessage) -> None:
         # process(requeue=False): ack при успехе; при исключении — nack без
@@ -71,7 +72,7 @@ async def run_notifier(send: Callable[[int, str], Awaitable[None]]) -> None:
         try:
             async with message.process(requeue=False):
                 payload = json.loads(message.body)
-                await send(payload["user_id"], payload["text"])
+                await deliver(payload)
         except Exception:
             logger.warning("Доставка не удалась, сообщение → DLQ", exc_info=True)
 
