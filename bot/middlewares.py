@@ -31,11 +31,12 @@ class InfraMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
-class DewarpStateGuardMiddleware(BaseMiddleware):
-    """Сбрасывает ожидание /dewarp, если пришла другая команда (смена намерения).
+class FlowStateGuardMiddleware(BaseMiddleware):
+    """Сбрасывает «ожидающие ввод» FSM-состояния при новой команде (смена намерения).
 
-    Без этого состояние waiting_image «липло» бы до первого изображения даже
-    после других команд — и случайное фото позже ушло бы в деварпинг.
+    Без этого состояние (ожидание фото для /dewarp, текста резюме для /match)
+    «липло» бы до первого сообщения даже после других команд — и случайный ввод
+    позже ушёл бы не туда. Свою команду флоу переустановит сам (напр. /match снова).
     """
 
     async def __call__(
@@ -46,16 +47,15 @@ class DewarpStateGuardMiddleware(BaseMiddleware):
     ) -> Any:
         # ленивый импорт — избегаем цикла на старте
         from services.dewarp.service import DewarpFlow
+        from services.vacancy.service import MatchFlow
 
         state = data.get("state")
         text = getattr(event, "text", None) or ""
-        is_other_command = (
-            text.startswith("/")
-            and not text.startswith("/dewarp")
-            and not text.startswith("/cancel")
-        )
-        if state is not None and is_other_command:
-            if await state.get_state() == DewarpFlow.waiting_image.state:
+        # любая команда, кроме /cancel, снимает ожидающее состояние
+        is_command = text.startswith("/") and not text.startswith("/cancel")
+        if state is not None and is_command:
+            waiting = {DewarpFlow.waiting_image.state, MatchFlow.waiting_resume.state}
+            if await state.get_state() in waiting:
                 await state.clear()
         return await handler(event, data)
 

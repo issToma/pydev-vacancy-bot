@@ -5,6 +5,8 @@ import json
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.filters.callback_data import CallbackData
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     BotCommand,
     CallbackQuery,
@@ -20,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.contracts import Infra
 from core.db import get_session
+from core.ratelimit import check_rate_limit
 from core.redis import get_redis
 from services.vacancy.repo import (
     VacancyFilters,
@@ -36,6 +39,10 @@ from services.vacancy.subs import (
 )
 
 STACK_CACHE_KEY = "cache:stack"
+
+
+class MatchFlow(StatesGroup):
+    waiting_resume = State()      # после /match бот ждёт текст резюме
 
 
 class SubDelCB(CallbackData, prefix="subdel"):
@@ -95,6 +102,7 @@ class VacancyService:
         BotCommand(command="stack", description="топ востребованных технологий"),
         BotCommand(command="subscribe", description="подписка на новые вакансии"),
         BotCommand(command="subscriptions", description="мои подписки"),
+        BotCommand(command="match", description="подбор вакансий по резюме (LLM)"),
     ]
     help_text = (
         "/vacancies [запрос] — поиск вакансий по разработке.\n"
@@ -104,11 +112,57 @@ class VacancyService:
         "/filter — подобрать фильтры кнопками (регион/формат/аккредитация)\n"
         "/stack — топ востребованных технологий в dev-вакансиях\n"
         "/subscribe <запрос> — подписаться на новые вакансии по запросу\n"
-        "/subscriptions — мои подписки"
+        "/subscriptions — мои подписки\n"
+        "/match — пришли резюме, подберу подходящие вакансии с пояснением"
     )
 
     def register(self, router: Router, infra: Infra) -> None:
         register_filter_dialog(router, infra)
+
+        @router.message(Command("match"))
+        async def match_start(message: Message, state: FSMContext) -> None:
+            await state.set_state(MatchFlow.waiting_resume)
+            await message.answer(
+                "Пришли текст резюме (или ключевые навыки, стек, опыт) одним сообщением — "
+                "подберу подходящие вакансии и поясню, почему.\n"
+                "/cancel — отмена."
+            )
+
+        @router.message(Command("cancel"), MatchFlow.waiting_resume)
+        async def match_cancel(message: Message, state: FSMContext) -> None:
+            await state.clear()
+            await message.answer("Подбор отменён.")
+
+        @router.message(MatchFlow.waiting_resume)
+        async def match_resume(message: Message, state: FSMContext) -> None:
+            resume = (message.text or "").strip()
+            if len(resume) < 20:
+                await message.answer(
+                    "Слишком коротко. Пришли текст резюме или хотя бы стек, опыт и роль."
+                )
+                return
+            # строгий лимит /match (дороже /ask: БД + LLM в фоне)
+            allowed = await check_rate_limit(
+                infra.redis, f"ratelimit:{message.from_user.id}:match",
+                settings.match_rate_limit, settings.match_rate_limit_window,
+            )
+            if not allowed:
+                await state.clear()
+                await message.answer(
+                    f"Лимит /match исчерпан ({settings.match_rate_limit} за "
+                    f"{settings.match_rate_limit_window // 60} мин). Попробуй позже."
+                )
+                return
+            await state.clear()
+            async with infra.session_factory() as session:
+                await upsert_user(session, message.from_user.id, message.from_user.username)
+                await session.commit()
+            # тяжёлое → в Celery (бот не импортирует worker-код, шлёт по имени задачи)
+            infra.celery.send_task(
+                "services.vacancy.tasks.match_vacancies",
+                args=[message.from_user.id, resume],
+            )
+            await message.answer("🔎 Подбираю вакансии по резюме — пришлю результат через ~минуту.")
 
         @router.message(Command("vacancies"))
         async def vacancies(message: Message) -> None:

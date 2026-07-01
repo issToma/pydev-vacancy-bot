@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from uuid import uuid4
 
 import redis.asyncio as aioredis
 from sqlalchemy import NullPool, func, select
@@ -10,10 +11,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from core.celery_app import celery_app
 from core.config import settings
+from core.models import Job, LlmUsage
+from services.vacancy.match import extract_stack, prefilter_candidates, rank_with_llm
 from services.vacancy.models import VacancyScraped
 from services.vacancy.notifications import publish_notifications
 from services.vacancy.scraper.hh_scraper import scrape_new_vacancies
 from services.vacancy.subs import list_active_subscriptions, subscription_matches
+
+TELEGRAM_TEXT_LIMIT = 4096
 
 logger = logging.getLogger(__name__)
 
@@ -112,3 +117,78 @@ def scrape_vacancies() -> int:
     saved = asyncio.run(_run())
     logger.info("scrape_vacancies: сохранено/обновлено %s", saved)
     return saved
+
+
+# ─────────────────────────── /match (подбор по резюме) ───────────────────────────
+
+async def _run_match(user_id: int, resume: str) -> str:
+    """Async-ядро подбора: предфильтр в БД → LLM-ранжирование → job + учёт + уведомление."""
+    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    job_id = uuid4()
+    try:
+        # заводим job в статусе running (история задач)
+        async with session_factory() as session:
+            session.add(Job(
+                id=job_id, user_id=user_id, service="vacancy", kind="match",
+                status="running", params={"resume_chars": len(resume)},
+            ))
+            await session.commit()
+
+        try:
+            # 1) дешёвый предфильтр кандидатов по стеку из резюме
+            stack = extract_stack(resume)
+            async with session_factory() as session:
+                candidates = await prefilter_candidates(session, stack, settings.match_candidates_limit)
+            logger.info("match: стек=%s, кандидатов=%s", stack[:10], len(candidates))
+
+            # 2) LLM ранжирует ТОЛЬКО кандидатов (не всю базу)
+            if candidates:
+                answer, usage = await rank_with_llm(resume, candidates)
+            else:
+                answer, usage = "По вашему стеку подходящих вакансий не нашлось.", None
+
+            # 3) job → done + учёт токенов
+            async with session_factory() as session:
+                job = await session.get(Job, job_id)
+                job.status = "done"
+                job.result_ref = answer[:TELEGRAM_TEXT_LIMIT]
+                if usage is not None:
+                    session.add(LlmUsage(
+                        user_id=user_id, service="match", model=settings.llm_model,
+                        tokens_in=usage.prompt_tokens or 0, tokens_out=usage.completion_tokens or 0,
+                    ))
+                await session.commit()
+
+            # 4) доставка результата пользователю (тот же RabbitMQ-путь)
+            header = f"🔎 Подбор по резюме (кандидатов: {len(candidates)}):\n\n"
+            await publish_notifications([{
+                "user_id": user_id,
+                "text": (header + answer)[:TELEGRAM_TEXT_LIMIT],
+            }])
+            return "ok"
+        except Exception as e:
+            logger.exception("match: ошибка ранжирования")
+            async with session_factory() as session:
+                job = await session.get(Job, job_id)
+                if job:
+                    job.status = "failed"
+                    job.result_ref = str(e)[:500]
+                    await session.commit()
+            await publish_notifications([{
+                "user_id": user_id,
+                "text": "⚠️ Не удалось выполнить подбор по резюме. Попробуйте позже.",
+            }])
+            return "failed"
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(name="services.vacancy.tasks.match_vacancies")
+def match_vacancies(user_id: int, resume: str) -> str:
+    """Celery-задача: подбор вакансий по резюме (тяжёлое → фон, в отличие от /ask).
+
+    Двухэтапно: SQL-предфильтр кандидатов → LLM-ранжирование топ-N с пояснением.
+    Результат кладётся в jobs.result_ref и доставляется пользователю уведомлением.
+    """
+    return asyncio.run(_run_match(user_id, resume))

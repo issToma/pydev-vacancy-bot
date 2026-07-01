@@ -9,7 +9,7 @@ from aiogram.types import BufferedInputFile, Message
 from core import s3
 
 from bot.help import build_help_router
-from bot.middlewares import DewarpStateGuardMiddleware, InfraMiddleware, RateLimitMiddleware
+from bot.middlewares import FlowStateGuardMiddleware, InfraMiddleware, RateLimitMiddleware
 from bot.registry import SERVICES, validate_registry
 from core.config import settings
 from core.infra import build_infra
@@ -48,8 +48,8 @@ def build_dispatcher() -> Dispatcher:
     )
     # DI: infra доступна во всех хендлерах через data["infra"]
     dp.message.middleware(InfraMiddleware(infra))
-    # смена намерения: другая команда снимает ожидание /dewarp
-    dp.message.middleware(DewarpStateGuardMiddleware())
+    # смена намерения: другая команда снимает ожидание ввода (/dewarp, /match)
+    dp.message.middleware(FlowStateGuardMiddleware())
 
     dp.include_router(build_core_router())
 

@@ -72,5 +72,11 @@ class Settings(BaseSettings):
     ask_rate_limit: int = 10
     ask_rate_limit_window: int = 3600
 
+    # --- Match (подбор вакансий по резюме) ---
+    match_candidates_limit: int = 25       # сколько кандидатов из БД уходит в LLM (не вся база)
+    match_max_tokens: int = 1024           # потолок ответа-ранжирования
+    match_rate_limit: int = 5              # /match дороже /ask (БД+LLM) → строже
+    match_rate_limit_window: int = 3600
+
 
 settings = Settings()
