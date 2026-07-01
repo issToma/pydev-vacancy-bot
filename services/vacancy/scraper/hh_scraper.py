@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from urllib.parse import urlencode
 
 from dateutil import parser as dt_parser
@@ -270,8 +271,16 @@ async def scrape_new_vacancies(existing_ids: set, on_batch=None) -> int:
         # disable=None → tqdm-бар только в настоящем TTY; в логах воркера (не-TTY)
         # он молчит, чтобы не спамить строками. Прогресс туда пишем логом отдельно.
         total = len(new_items)
+        # мягкий дедлайн прогона: остаток доберёт следующий тик (избегаем SIGKILL по hard-лимиту)
+        deadline = (time.monotonic() + config.MAX_RUN_SECONDS) if config.MAX_RUN_SECONDS else None
         bar = tqdm(new_items, desc="Сбор вакансий", unit="вак", dynamic_ncols=True, disable=None)
         for i, (vid, url) in enumerate(bar):
+            if deadline and time.monotonic() >= deadline:
+                logger.info(
+                    "Лимит времени прогона %sс достигнут — остаток %s доберём в следующий тик",
+                    config.MAX_RUN_SECONDS, total - i,
+                )
+                break
             # периодически пересоздаём контекст — освобождаем накопленную браузером память
             if config.RECYCLE_EVERY and i and i % config.RECYCLE_EVERY == 0:
                 await context.close()
