@@ -31,6 +31,35 @@ class InfraMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
+class DewarpStateGuardMiddleware(BaseMiddleware):
+    """Сбрасывает ожидание /dewarp, если пришла другая команда (смена намерения).
+
+    Без этого состояние waiting_image «липло» бы до первого изображения даже
+    после других команд — и случайное фото позже ушло бы в деварпинг.
+    """
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        # ленивый импорт — избегаем цикла на старте
+        from services.dewarp.service import DewarpFlow
+
+        state = data.get("state")
+        text = getattr(event, "text", None) or ""
+        is_other_command = (
+            text.startswith("/")
+            and not text.startswith("/dewarp")
+            and not text.startswith("/cancel")
+        )
+        if state is not None and is_other_command:
+            if await state.get_state() == DewarpFlow.waiting_image.state:
+                await state.clear()
+        return await handler(event, data)
+
+
 class RateLimitMiddleware(BaseMiddleware):
     """Ограничение частоты сообщений на пользователя (Redis INCR+EXPIRE).
 

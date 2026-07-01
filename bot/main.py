@@ -9,10 +9,11 @@ from aiogram.types import BufferedInputFile, Message
 from core import s3
 
 from bot.help import build_help_router
-from bot.middlewares import InfraMiddleware, RateLimitMiddleware
+from bot.middlewares import DewarpStateGuardMiddleware, InfraMiddleware, RateLimitMiddleware
 from bot.registry import SERVICES, validate_registry
 from core.config import settings
 from core.infra import build_infra
+from services.dewarp.service import build_result_kb
 from services.vacancy.notifications import run_notifier
 
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +48,8 @@ def build_dispatcher() -> Dispatcher:
     )
     # DI: infra доступна во всех хендлерах через data["infra"]
     dp.message.middleware(InfraMiddleware(infra))
+    # смена намерения: другая команда снимает ожидание /dewarp
+    dp.message.middleware(DewarpStateGuardMiddleware())
 
     dp.include_router(build_core_router())
 
@@ -75,10 +78,12 @@ async def main() -> None:
         user_id = payload["user_id"]
         if payload.get("photo_key"):
             data = await s3.get_object(payload["photo_bucket"], payload["photo_key"])
+            # по умолчанию — фото (превью в чате) + кнопка получить полное качество файлом
             await bot.send_photo(
                 user_id,
                 BufferedInputFile(data, filename="dewarped.jpg"),
                 caption=payload.get("caption", ""),
+                reply_markup=build_result_kb(payload["photo_key"]),
             )
         else:
             await bot.send_message(user_id, payload["text"], disable_web_page_preview=True)
