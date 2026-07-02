@@ -137,6 +137,14 @@ class VacancyService:
         async def _show_vacancies(message: Message, query: str | None) -> None:
             async with infra.session_factory() as session:
                 rows = await search_vacancies(session, VacancyFilters(text=query, limit=10))
+            if not rows:
+                hint = f" по названию «{query}»" if query else ""
+                await message.answer(
+                    f"Ничего не найдено{hint}. Поиск идёт по названию вакансии; "
+                    "в базе сейчас только Python-вакансии (попробуй: middle, senior, django)."
+                )
+                return
+            # показываем первые 10 (по свежести)
             await message.answer(_format_vacancies(rows), disable_web_page_preview=True)
 
         async def _show_stack(message: Message) -> None:
@@ -196,7 +204,10 @@ class VacancyService:
         @router.message(F.text == self.BTN_SEARCH)
         async def btn_search(message: Message, state: FSMContext) -> None:
             await state.set_state(SearchFlow.waiting_query)
-            await message.answer("Что ищем? Напиши запрос (напр.: senior python). «☰ Меню» — отмена.")
+            await message.answer(
+                "Что ищем? Поиск идёт по НАЗВАНИЮ вакансии (напр.: middle, senior, django). "
+                "Показываю до 10 свежих. «☰ Меню» — отмена."
+            )
 
         @router.message(F.text == self.BTN_STACK)
         async def btn_stack(message: Message, state: FSMContext) -> None:

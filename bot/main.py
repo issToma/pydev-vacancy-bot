@@ -10,7 +10,7 @@ from core import s3
 
 from bot.help import build_help_router
 from bot.middlewares import FlowStateGuardMiddleware, InfraMiddleware, RateLimitMiddleware
-from bot.navigation import build_navigation_router
+from bot.navigation import build_fallback_router, build_navigation_router
 from bot.registry import SERVICES, validate_registry
 from core.config import settings
 from core.infra import build_infra
@@ -51,6 +51,7 @@ def build_dispatcher() -> Dispatcher:
         dp.include_router(router)
 
     dp.include_router(build_help_router(SERVICES))   # авто-/help из реестра
+    dp.include_router(build_fallback_router())        # ПОСЛЕДНИМ: нераспознанный ввод
     return dp
 
 

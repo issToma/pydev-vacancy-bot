@@ -86,3 +86,18 @@ def build_navigation_router(services: list[ServiceModule]) -> Router:
         )
 
     return router
+
+
+def build_fallback_router() -> Router:
+    """Ловит нераспознанный ввод (свободный текст/файл вне действия) — вместо тишины
+    подсказывает навигацию. Подключается ПОСЛЕДНИМ: сюда падает то, что не поймали
+    ни команды, ни кнопки, ни состояния."""
+    router = Router(name="fallback")
+
+    @router.message()
+    async def unknown(message: Message) -> None:
+        await message.answer(
+            "Не понял 🤔 Выбери действие кнопкой снизу или открой разделы: /menu"
+        )
+
+    return router
