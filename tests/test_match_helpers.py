@@ -17,4 +17,5 @@ def test_candidates_block_format():
         "key_skills": ["Python", "FastAPI"], "techs": [],
     }]
     out = _candidates_block(cands)
-    assert "1." in out and "[42]" in out and "Py Dev" in out and "Python" in out
+    # без порядкового номера (чтобы модель не echo-ила его), но с id для ссылки и навыками
+    assert "[42]" in out and "Py Dev" in out and "Python" in out
