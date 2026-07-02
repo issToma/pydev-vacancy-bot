@@ -142,6 +142,10 @@ class VacancyService:
                     "Слишком коротко. Пришли текст резюме или хотя бы стек, опыт и роль."
                 )
                 return
+            if not settings.llm_api_key:
+                await state.clear()
+                await message.answer("LLM не настроен: добавь LLM_API_KEY в .env")
+                return
             # строгий лимит /match (дороже /ask: БД + LLM в фоне)
             allowed = await check_rate_limit(
                 infra.redis, f"ratelimit:{message.from_user.id}:match",
