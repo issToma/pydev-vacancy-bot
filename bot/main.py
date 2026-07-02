@@ -69,6 +69,9 @@ async def main() -> None:
     bot = Bot(token=settings.telegram_bot_token)
     dp = build_dispatcher()
 
+    # S3-бакеты для Dewarp (idempotent) — чтобы на свежем MinIO загрузка не падала.
+    await s3.ensure_buckets()
+
     # Меню команд Telegram («Menu» у поля ввода) — собираем из реестра сервисов.
     menu = [cmd for service in SERVICES for cmd in service.commands]
     await bot.set_my_commands(menu)

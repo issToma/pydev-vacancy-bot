@@ -1,3 +1,12 @@
+# Общие env для контейнеров приложения: хосты = имена сервисов compose-сети
+# (переопределяют localhost-значения из .env; environment важнее env_file).
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://vacancy:vacancy@postgres:5432/vacancy
+  CELERY_BROKER_URL: amqp://vacancy:vacancy@rabbitmq:5672//
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  REDIS_URL: redis://redis:6379/1
+  RABBITMQ_URL: amqp://vacancy:vacancy@rabbitmq:5672/
+  S3_ENDPOINT_URL: http://minio:9000
 
 services:
   # ── Инфраструктура ─────────────────────────────────────────────
@@ -53,27 +62,65 @@ services:
     volumes:
       - miniodata:/data
 
+  # ── Одноразовая миграция БД (перед стартом приложения) ────────────
+  migrate:
+    build: .
+    command: uv run alembic upgrade head
+    env_file: .env
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   # ── Приложение ────────────────────────────────────────────────
   api:
     build: .
     command: uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
     env_file: .env
+    environment:
+      <<: *app-env
     ports:
       - "8000:8000"
+    restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
 
   bot:
     build: .
     command: uv run python -m bot.main
     env_file: .env
+    environment:
+      <<: *app-env
+    restart: unless-stopped
     depends_on:
-      - api
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      minio: {condition: service_started}
+      migrate: {condition: service_completed_successfully}
+
+  # Celery-воркер + встроенный Beat (scrape по расписанию, dewarp, match)
+  worker:
+    build: .
+    command: uv run celery -A core.celery_app:celery_app worker -B -l info
+    env_file: .env
+    environment:
+      <<: *app-env
+    shm_size: "1gb"          # Playwright/Firefox стабильнее с большим /dev/shm
+    volumes:
+      - ./weights:/app/weights   # веса YOLO для dewarp (в git не коммитятся)
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      minio: {condition: service_started}
+      migrate: {condition: service_completed_successfully}
 
 volumes:
   pgdata:
