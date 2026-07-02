@@ -88,6 +88,11 @@ def build_navigation_router(services: list[ServiceModule]) -> Router:
             f"Раздел «{SECTION_LABELS[service.name]}».\n\n{service.help_text}",
             reply_markup=_section_kb(service),
         )
+        # опциональный хук: раздел с единственным действием сразу входит в свой режим
+        # (напр. Dewarp — ожидание изображения без промежуточной кнопки)
+        on_enter = getattr(service, "on_enter", None)
+        if on_enter is not None:
+            await on_enter(message, state)
 
     return router
 
