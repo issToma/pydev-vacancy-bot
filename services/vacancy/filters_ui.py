@@ -113,7 +113,9 @@ async def _run_search(callback: CallbackQuery, data: dict, infra: Infra) -> None
         )
     else:
         text = "Ничего не найдено по выбранным фильтрам"
-    # состояние НЕ сбрасываем — остаёмся в фильтрах: можно менять и искать снова
-    # (выход кнопкой раздела или «☰ Меню»)
     await callback.message.answer(text, disable_web_page_preview=True)
+    # клавиатуру фильтров дублируем ПОД результатами (с текущими галочками) —
+    # не нужно скроллить вверх; состояние НЕ сбрасываем, можно менять и искать снова
+    await callback.message.answer("Изменить фильтры", reply_markup=build_filter_kb(data))
+    await callback.answer()
     await callback.answer()
