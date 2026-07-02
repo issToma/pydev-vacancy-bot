@@ -3,14 +3,14 @@ import logging
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import CommandStart
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BotCommand, BufferedInputFile
 
 from core import s3
 
 from bot.help import build_help_router
 from bot.middlewares import FlowStateGuardMiddleware, InfraMiddleware, RateLimitMiddleware
+from bot.navigation import build_navigation_router
 from bot.registry import SERVICES, validate_registry
 from core.config import settings
 from core.infra import build_infra
@@ -19,19 +19,6 @@ from services.dewarp.service import build_result_kb
 from services.vacancy.notifications import run_notifier_supervised
 
 logging.basicConfig(level=logging.INFO)
-
-
-def build_core_router() -> Router:
-    """Базовые команды бота, не привязанные к сервисам."""
-    router = Router(name="core")
-
-    @router.message(CommandStart())
-    async def start(message: Message) -> None:
-        await message.answer(
-            "Привет! Я vacancy-bot. Список команд — /help"
-        )
-
-    return router
 
 
 def build_dispatcher() -> Dispatcher:
@@ -53,7 +40,9 @@ def build_dispatcher() -> Dispatcher:
     # смена намерения: другая команда снимает ожидание ввода (/dewarp, /match)
     dp.message.middleware(FlowStateGuardMiddleware())
 
-    dp.include_router(build_core_router())
+    # навигация (главное меню + разделы) — включаем первой: ловит /start, /menu,
+    # кнопки разделов раньше сервисных хендлеров
+    dp.include_router(build_navigation_router(SERVICES))
 
     # Роутеры сервисов — итерацией по реестру (ядро не знает конкретных сервисов)
     for service in SERVICES:
@@ -72,9 +61,9 @@ async def main() -> None:
     # S3-бакеты для Dewarp (idempotent) — чтобы на свежем MinIO загрузка не падала.
     await s3.ensure_buckets()
 
-    # Меню команд Telegram («Menu» у поля ввода) — собираем из реестра сервисов.
-    menu = [cmd for service in SERVICES for cmd in service.commands]
-    await bot.set_my_commands(menu)
+    # Глобальное /-меню по умолчанию — только вход в разделы (/menu). Команды
+    # конкретного раздела навигация выставляет per-chat при входе в раздел.
+    await bot.set_my_commands([BotCommand(command="menu", description="главное меню")])
 
     # Прямой RabbitMQ-consumer уведомлений — фоновой задачей внутри бота.
     # deliver решает, как доставить payload: текст (подписки) или фото из S3 (dewarp).
