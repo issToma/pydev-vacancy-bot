@@ -44,10 +44,12 @@ class DewarpService:
     """Dewarp: по команде /dewarp пользователь присылает документ → выпрямленное изображение."""
 
     name = "dewarp"
+    BTN_DEWARP = "🖼 Выпрямить документ"
+    menu_buttons = [BTN_DEWARP]
     commands = [BotCommand(command="dewarp", description="выпрямить документ (фото или файл)")]
     help_text = (
-        "/dewarp — затем пришли документ фото или файлом, верну выпрямленную версию.\n"
-        "  Для лучшего качества входа отправляй как файл (без сжатия Telegram)."
+        "🖼 Выпрямить документ — затем пришли фото или файл-картинку, верну выпрямленную версию.\n"
+        "Для лучшего качества отправляй как файл (📎 → File), без сжатия Telegram."
     )
 
     def register(self, router: Router, infra: Infra) -> None:
@@ -75,11 +77,12 @@ class DewarpService:
             await message.answer("Документ получил, обрабатываю — пришлю результат.")
 
         @router.message(Command("dewarp"))
+        @router.message(F.text == self.BTN_DEWARP)
         async def start_dewarp(message: Message, state: FSMContext) -> None:
             await state.set_state(DewarpFlow.waiting_image)
             await message.answer(
                 "Пришли документ фото или файлом — верну выпрямленную версию.\n"
-                "Лучше как файл (📎 → File), без сжатия. /cancel — отмена."
+                "Лучше как файл (📎 → File), без сжатия. «☰ Меню» — отмена."
             )
 
         @router.message(DewarpFlow.waiting_image, Command("cancel"))

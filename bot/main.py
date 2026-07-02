@@ -4,7 +4,7 @@ import logging
 from aiogram import Bot, Dispatcher, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import BotCommand, BufferedInputFile
+from aiogram.types import BufferedInputFile
 
 from core import s3
 
@@ -61,9 +61,9 @@ async def main() -> None:
     # S3-бакеты для Dewarp (idempotent) — чтобы на свежем MinIO загрузка не падала.
     await s3.ensure_buckets()
 
-    # Глобальное /-меню по умолчанию — только вход в разделы (/menu). Команды
-    # конкретного раздела навигация выставляет per-chat при входе в раздел.
-    await bot.set_my_commands([BotCommand(command="menu", description="главное меню")])
+    # Глобальное /-меню по умолчанию — пустое: на главном уровне навигация идёт
+    # reply-клавиатурой, а команды раздела навигация выставляет per-chat при входе.
+    await bot.set_my_commands([])
 
     # Прямой RabbitMQ-consumer уведомлений — фоновой задачей внутри бота.
     # deliver решает, как доставить payload: текст (подписки) или фото из S3 (dewarp).

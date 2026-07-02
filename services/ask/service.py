@@ -4,9 +4,11 @@ import json
 import logging
 import time
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BotCommand, Message
 
 from core.contracts import Infra
@@ -80,6 +82,10 @@ async def _record_usage(session_factory, user_id: int, model: str, usage) -> Non
         logger.exception("Не удалось записать llm_usage")
 
 
+class AskFlow(StatesGroup):
+    waiting_question = State()     # кнопка «Задать вопрос» → ждём текст вопроса
+
+
 class AskService:
     """Ask: /ask <вопрос> — Q&A по разработке через LLM со streaming-ответом.
 
@@ -88,41 +94,35 @@ class AskService:
     """
 
     name = "ask"
+    BTN_ASK = "🤖 Задать вопрос"
+    BTN_USAGE = "📊 Мой расход"
+    menu_buttons = [BTN_ASK, BTN_USAGE]
     commands = [
         BotCommand(command="ask", description="вопрос по программированию (LLM)"),
         BotCommand(command="usage", description="мой расход токенов LLM за сутки"),
     ]
     help_text = (
-        "/ask <вопрос> — точечный вопрос по программированию (в стиле StackOverflow).\n"
-        "  Помнит контекст последних реплик — можно уточнять. Напр.: /ask чем RabbitMQ отличается от Kafka\n"
-        "/usage — сколько токенов LLM ты потратил за последние сутки"
+        "🤖 Задать вопрос — точечный вопрос по программированию (в стиле StackOverflow); "
+        "помнит контекст последних реплик, можно уточнять.\n"
+        "📊 Мой расход — сколько токенов LLM ты потратил за сутки."
     )
 
     def register(self, router: Router, infra: Infra) -> None:
         settings = infra.settings
 
-        @router.message(Command("ask"))
-        async def ask(message: Message, command: CommandObject) -> None:
-            question = (command.args or "").strip()
-            if not question:
-                await message.answer(
-                    "Использование: /ask <вопрос>\n"
-                    "Напр.: /ask как в SQLAlchemy сделать ORM-запрос к PostgreSQL"
-                )
-                return
+        async def _run_ask(message: Message, question: str) -> None:
             if not settings.llm_api_key:
                 await message.answer("LLM не настроен: добавь LLM_API_KEY в .env")
                 return
-
             user_id = message.from_user.id
-            # отдельный, более строгий лимит для дорогой /ask (сверх общего rate-limit)
+            # отдельный строгий лимит на дорогой запрос (сверх общего rate-limit)
             allowed = await check_rate_limit(
                 infra.redis, f"ratelimit:{user_id}:ask",
                 settings.ask_rate_limit, settings.ask_rate_limit_window,
             )
             if not allowed:
                 await message.answer(
-                    f"Лимит /ask исчерпан ({settings.ask_rate_limit} за "
+                    f"Лимит вопросов исчерпан ({settings.ask_rate_limit} за "
                     f"{settings.ask_rate_limit_window // 60} мин). Попробуй позже."
                 )
                 return
@@ -130,7 +130,7 @@ class AskService:
             async with infra.session_factory() as session:
                 if await over_budget(session, user_id, settings.llm_daily_token_budget):
                     await message.answer(
-                        "Дневной лимит токенов LLM исчерпан. Загляни в /usage; попробуй завтра."
+                        "Дневной лимит токенов LLM исчерпан. Загляни в «📊 Мой расход»; попробуй завтра."
                     )
                     return
 
@@ -140,9 +140,7 @@ class AskService:
                 *history,
                 {"role": "user", "content": question},
             ]
-
             placeholder = await message.answer("⌛ думаю…")
-
             kwargs: dict = {
                 "model": settings.llm_model,
                 "max_tokens": settings.ask_max_tokens,
@@ -150,8 +148,7 @@ class AskService:
                 "stream": True,
                 "stream_options": {"include_usage": True},   # токены приходят в финальном чанке
             }
-            # у «думающих» моделей отключаем рассуждения, чтобы не резать ответ
-            if settings.ask_reasoning_effort:
+            if settings.ask_reasoning_effort:                 # «думающие» модели: без рассуждений
                 kwargs["reasoning_effort"] = settings.ask_reasoning_effort
 
             acc = ""
@@ -178,18 +175,15 @@ class AskService:
                 await _safe_edit(placeholder, f"⚠️ Ошибка LLM: {e}")
                 return
 
-            # сохраняем диалог только при успешном ответе
             history.append({"role": "user", "content": question})
             history.append({"role": "assistant", "content": acc})
             await _save_history(
                 infra.redis, user_id, history,
                 settings.ask_dialog_max_turns, settings.ask_dialog_ttl,
             )
-            # учёт расхода токенов (cost-control)
             await _record_usage(infra.session_factory, user_id, settings.llm_model, usage)
 
-        @router.message(Command("usage"))
-        async def usage_cmd(message: Message) -> None:
+        async def _show_usage(message: Message) -> None:
             async with infra.session_factory() as session:
                 rows = await usage_summary(session, message.from_user.id)
             if not rows:
@@ -206,6 +200,43 @@ class AskService:
             tail = f" из {budget} лимита" if budget else ""
             lines.append(f"Итого: {total_n} запр., {total_in + total_out} токенов{tail}")
             await message.answer("\n".join(lines))
+
+        # ── команды (по вводу) ──
+        @router.message(Command("ask"))
+        async def cmd_ask(message: Message, command: CommandObject) -> None:
+            question = (command.args or "").strip()
+            if not question:
+                await message.answer(
+                    "Использование: /ask <вопрос>\n"
+                    "Напр.: /ask как в SQLAlchemy сделать ORM-запрос к PostgreSQL"
+                )
+                return
+            await _run_ask(message, question)
+
+        @router.message(Command("usage"))
+        async def cmd_usage(message: Message) -> None:
+            await _show_usage(message)
+
+        # ── кнопки-слова (до prompt-обработчика состояния) ──
+        @router.message(F.text == self.BTN_ASK)
+        async def btn_ask(message: Message, state: FSMContext) -> None:
+            await state.set_state(AskFlow.waiting_question)
+            await message.answer("Задай вопрос по программированию. «☰ Меню» — отмена.")
+
+        @router.message(F.text == self.BTN_USAGE)
+        async def btn_usage(message: Message, state: FSMContext) -> None:
+            await state.clear()
+            await _show_usage(message)
+
+        # ── ввод вопроса (свободный текст в режиме ожидания) ──
+        @router.message(AskFlow.waiting_question)
+        async def on_question(message: Message, state: FSMContext) -> None:
+            question = (message.text or "").strip()
+            await state.clear()
+            if not question:
+                await message.answer("Пустой вопрос.")
+                return
+            await _run_ask(message, question)
 
     def api_router(self) -> None:
         # /ask — только через бота (интерактивный streaming), REST-эндпоинта нет

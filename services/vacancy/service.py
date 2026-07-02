@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
@@ -44,6 +44,14 @@ STACK_CACHE_KEY = "cache:stack"
 
 class MatchFlow(StatesGroup):
     waiting_resume = State()      # после /match бот ждёт текст резюме
+
+
+class SearchFlow(StatesGroup):
+    waiting_query = State()       # кнопка «Поиск» → ждём поисковый запрос
+
+
+class SubscribeFlow(StatesGroup):
+    waiting_query = State()       # кнопка «Подписаться» → ждём запрос подписки
 
 
 class SubDelCB(CallbackData, prefix="subdel"):
@@ -94,9 +102,20 @@ def _format_vacancies(rows: list[VacancyRow]) -> str:
 
 
 class VacancyService:
-    """Vacancy Radar: поиск вакансий (REST + команда бота)."""
+    """Vacancy Radar: поиск/аналитика вакансий, подписки, подбор по резюме."""
 
     name = "vacancy"
+
+    # ярлыки reply-кнопок раздела (их же обрабатываем ниже)
+    BTN_SEARCH = "🔎 Поиск"
+    BTN_FILTER = "🎛 Фильтры"
+    BTN_STACK = "📊 Топ стек"
+    BTN_SUBSCRIBE = "🔔 Подписаться"
+    BTN_SUBS = "📜 Мои подписки"
+    BTN_MATCH = "🎯 Подбор по резюме"
+    menu_buttons = [BTN_SEARCH, BTN_FILTER, BTN_STACK, BTN_SUBSCRIBE, BTN_SUBS, BTN_MATCH]
+
+    # команды (работают по вводу; в /-меню не показываем — навигация кнопками)
     commands = [
         BotCommand(command="vacancies", description="поиск вакансий по разработке"),
         BotCommand(command="filter", description="подбор фильтров кнопками"),
@@ -106,36 +125,115 @@ class VacancyService:
         BotCommand(command="match", description="подбор вакансий по резюме (LLM)"),
     ]
     help_text = (
-        "/vacancies [запрос] — поиск вакансий по разработке.\n"
-        "  Запрос (необязательно) ищется в названии вакансии; "
-        "без него — последние вакансии.\n"
-        "  Пример: /vacancies senior python\n"
-        "/filter — подобрать фильтры кнопками (регион/формат/аккредитация)\n"
-        "/stack — топ востребованных технологий в dev-вакансиях\n"
-        "/subscribe <запрос> — подписаться на новые вакансии по запросу\n"
-        "/subscriptions — мои подписки\n"
-        "/match — пришли резюме, подберу подходящие вакансии с пояснением"
+        "🔎 Поиск — вакансии по названию · 🎛 Фильтры — регион/формат/аккредитация\n"
+        "📊 Топ стек — востребованные технологии · 🔔 Подписаться — уведомления о новых\n"
+        "📜 Мои подписки — список/удаление · 🎯 Подбор по резюме — подбор через LLM"
     )
 
     def register(self, router: Router, infra: Infra) -> None:
-        register_filter_dialog(router, infra)
+        register_filter_dialog(router, infra, self.BTN_FILTER)
 
-        @router.message(Command("match"))
-        async def match_start(message: Message, state: FSMContext) -> None:
+        # ── общая логика (переиспользуется командой и кнопкой) ──
+        async def _show_vacancies(message: Message, query: str | None) -> None:
+            async with infra.session_factory() as session:
+                rows = await search_vacancies(session, VacancyFilters(text=query, limit=10))
+            await message.answer(_format_vacancies(rows), disable_web_page_preview=True)
+
+        async def _show_stack(message: Message) -> None:
+            async with infra.session_factory() as session:
+                rows = await get_stack(session, infra.redis)
+            lines = [f"{r['pct']}% — {r['technology']}" for r in rows[:20]]
+            await message.answer("Топ технологий (dev-вакансии):\n\n" + "\n".join(lines))
+
+        async def _create_sub(message: Message, query: str) -> None:
+            async with infra.session_factory() as session:
+                await upsert_user(session, message.from_user.id, message.from_user.username)
+                await create_subscription(session, message.from_user.id, {"text": query})
+                await session.commit()
+            await message.answer(f"Подписка создана: «{query}». Пришлю новые подходящие вакансии.")
+
+        async def _show_subs(message: Message) -> None:
+            async with infra.session_factory() as session:
+                subs = await list_user_subscriptions(session, message.from_user.id)
+            if not subs:
+                await message.answer("У тебя нет активных подписок. Нажми «🔔 Подписаться».")
+                return
+            await message.answer("Твои подписки (тап 🗑 — удалить):", reply_markup=_subs_keyboard(subs))
+
+        async def _start_match(message: Message, state: FSMContext) -> None:
             await state.set_state(MatchFlow.waiting_resume)
             await message.answer(
-                "Пришли текст резюме (или ключевые навыки, стек, опыт) одним сообщением — "
-                "подберу подходящие вакансии и поясню, почему.\n"
-                "/cancel — отмена."
+                "Пришли текст резюме (стек, опыт, роль; можно указать город) одним сообщением — "
+                "подберу подходящие вакансии и поясню, почему. «☰ Меню» — отмена."
             )
 
-        @router.message(Command("cancel"), MatchFlow.waiting_resume)
-        async def match_cancel(message: Message, state: FSMContext) -> None:
+        # ── команды (по вводу) ──
+        @router.message(Command("vacancies"))
+        async def cmd_vacancies(message: Message) -> None:
+            await _show_vacancies(message, message.text.partition(" ")[2].strip() or None)
+
+        @router.message(Command("stack"))
+        async def cmd_stack(message: Message) -> None:
+            await _show_stack(message)
+
+        @router.message(Command("subscribe"))
+        async def cmd_subscribe(message: Message) -> None:
+            query = message.text.partition(" ")[2].strip()
+            if not query:
+                await message.answer("Укажи запрос: /subscribe python")
+                return
+            await _create_sub(message, query)
+
+        @router.message(Command("subscriptions"))
+        async def cmd_subs(message: Message) -> None:
+            await _show_subs(message)
+
+        @router.message(Command("match"))
+        async def cmd_match(message: Message, state: FSMContext) -> None:
+            await _start_match(message, state)
+
+        # ── кнопки-слова раздела (регистрируем ДО prompt-обработчиков состояний) ──
+        @router.message(F.text == self.BTN_SEARCH)
+        async def btn_search(message: Message, state: FSMContext) -> None:
+            await state.set_state(SearchFlow.waiting_query)
+            await message.answer("Что ищем? Напиши запрос (напр.: senior python). «☰ Меню» — отмена.")
+
+        @router.message(F.text == self.BTN_STACK)
+        async def btn_stack(message: Message, state: FSMContext) -> None:
             await state.clear()
-            await message.answer("Подбор отменён.")
+            await _show_stack(message)
+
+        @router.message(F.text == self.BTN_SUBSCRIBE)
+        async def btn_subscribe(message: Message, state: FSMContext) -> None:
+            await state.set_state(SubscribeFlow.waiting_query)
+            await message.answer("На какой запрос подписать? (напр.: python). «☰ Меню» — отмена.")
+
+        @router.message(F.text == self.BTN_SUBS)
+        async def btn_subs(message: Message, state: FSMContext) -> None:
+            await state.clear()
+            await _show_subs(message)
+
+        @router.message(F.text == self.BTN_MATCH)
+        async def btn_match(message: Message, state: FSMContext) -> None:
+            await _start_match(message, state)
+
+        # ── ввод для prompt-флоу (после кнопок: свободный текст сюда, ярлыки — в кнопки) ──
+        @router.message(SearchFlow.waiting_query)
+        async def on_search_query(message: Message, state: FSMContext) -> None:
+            await state.clear()
+            await _show_vacancies(message, (message.text or "").strip() or None)
+
+        @router.message(SubscribeFlow.waiting_query)
+        async def on_subscribe_query(message: Message, state: FSMContext) -> None:
+            query = (message.text or "").strip()
+            await state.clear()
+            if not query:
+                await message.answer("Пустой запрос — подписка не создана.")
+                return
+            await _create_sub(message, query)
 
         @router.message(MatchFlow.waiting_resume)
-        async def match_resume(message: Message, state: FSMContext) -> None:
+        async def on_resume(message: Message, state: FSMContext) -> None:
             resume = (message.text or "").strip()
             if len(resume) < 20:
                 await message.answer(
@@ -146,7 +244,6 @@ class VacancyService:
                 await state.clear()
                 await message.answer("LLM не настроен: добавь LLM_API_KEY в .env")
                 return
-            # строгий лимит /match (дороже /ask: БД + LLM в фоне)
             allowed = await check_rate_limit(
                 infra.redis, f"ratelimit:{message.from_user.id}:match",
                 settings.match_rate_limit, settings.match_rate_limit_window,
@@ -154,71 +251,26 @@ class VacancyService:
             if not allowed:
                 await state.clear()
                 await message.answer(
-                    f"Лимит /match исчерпан ({settings.match_rate_limit} за "
+                    f"Лимит подбора исчерпан ({settings.match_rate_limit} за "
                     f"{settings.match_rate_limit_window // 60} мин). Попробуй позже."
                 )
                 return
-            # спенд-лимит: суточный бюджет токенов LLM (контроль стоимости)
             async with infra.session_factory() as session:
                 if await over_budget(session, message.from_user.id, settings.llm_daily_token_budget):
                     await state.clear()
                     await message.answer(
-                        "Дневной лимит токенов LLM исчерпан. Загляни в /usage; попробуй завтра."
+                        "Дневной лимит токенов LLM исчерпан. Загляни в «📊 Мой расход»; попробуй завтра."
                     )
                     return
             await state.clear()
             async with infra.session_factory() as session:
                 await upsert_user(session, message.from_user.id, message.from_user.username)
                 await session.commit()
-            # тяжёлое → в Celery (бот не импортирует worker-код, шлёт по имени задачи)
             infra.celery.send_task(
                 "services.vacancy.tasks.match_vacancies",
                 args=[message.from_user.id, resume],
             )
             await message.answer("🔎 Подбираю вакансии по резюме — пришлю результат через ~минуту.")
-
-        @router.message(Command("vacancies"))
-        async def vacancies(message: Message) -> None:
-            # текст после команды → поисковый запрос по названию
-            query = message.text.partition(" ")[2].strip() or None
-            async with infra.session_factory() as session:
-                rows = await search_vacancies(
-                    session, VacancyFilters(text=query, limit=10)
-                )
-            await message.answer(_format_vacancies(rows), disable_web_page_preview=True)
-
-        @router.message(Command("stack"))
-        async def stack(message: Message) -> None:
-            async with infra.session_factory() as session:
-                rows = await get_stack(session, infra.redis)
-            top = rows[:20]
-            lines = [f"{r['pct']}% — {r['technology']}" for r in top]
-            await message.answer("Топ технологий (dev-вакансии):\n\n" + "\n".join(lines))
-
-        @router.message(Command("subscribe"))
-        async def subscribe(message: Message) -> None:
-            query = message.text.partition(" ")[2].strip()
-            if not query:
-                await message.answer("Укажи запрос: /subscribe python")
-                return
-            async with infra.session_factory() as session:
-                await upsert_user(
-                    session, message.from_user.id, message.from_user.username
-                )
-                await create_subscription(
-                    session, message.from_user.id, {"text": query}
-                )
-                await session.commit()
-            await message.answer(f"Подписка создана: «{query}». Пришлю новые подходящие вакансии.")
-
-        @router.message(Command("subscriptions"))
-        async def subscriptions(message: Message) -> None:
-            async with infra.session_factory() as session:
-                subs = await list_user_subscriptions(session, message.from_user.id)
-            if not subs:
-                await message.answer("У тебя нет активных подписок. Создай: /subscribe python")
-                return
-            await message.answer("Твои подписки (тап 🗑 — удалить):", reply_markup=_subs_keyboard(subs))
 
         @router.callback_query(SubDelCB.filter())
         async def delete_sub(callback: CallbackQuery, callback_data: SubDelCB) -> None:

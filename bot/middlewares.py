@@ -45,18 +45,13 @@ class FlowStateGuardMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        # ленивый импорт — избегаем цикла на старте
-        from services.dewarp.service import DewarpFlow
-        from services.vacancy.service import MatchFlow
-
         state = data.get("state")
         text = getattr(event, "text", None) or ""
-        # любая команда, кроме /cancel, снимает ожидающее состояние
+        # любая команда, кроме /cancel, = новое намерение → снимаем любое
+        # незавершённое состояние ввода (ожидание фото/резюме/запроса/вопроса)
         is_command = text.startswith("/") and not text.startswith("/cancel")
-        if state is not None and is_command:
-            waiting = {DewarpFlow.waiting_image.state, MatchFlow.waiting_resume.state}
-            if await state.get_state() in waiting:
-                await state.clear()
+        if state is not None and is_command and await state.get_state() is not None:
+            await state.clear()
         return await handler(event, data)
 
 

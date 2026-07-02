@@ -39,7 +39,8 @@ class ServiceModule(Protocol):
     """
 
     name: str
-    commands: list[BotCommand]   # команды сервиса с описаниями (для меню Telegram)
+    commands: list[BotCommand]   # команды сервиса (работают по вводу; в /-меню не показываем)
+    menu_buttons: list[str]      # ярлыки reply-кнопок раздела (навигация строит из них)
     help_text: str
 
     def register(self, router: Router, infra: Infra) -> None:

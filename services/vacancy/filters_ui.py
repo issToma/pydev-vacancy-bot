@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.filters.callback_data import CallbackData
@@ -59,8 +59,7 @@ def build_filter_kb(data: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def register_filter_dialog(router: Router, infra: Infra) -> None:
-    @router.message(Command("filter"))
+def register_filter_dialog(router: Router, infra: Infra, button_label: str | None = None) -> None:
     async def open_filter(message: Message, state: FSMContext) -> None:
         await state.set_state(FilterFlow.building)
         await state.set_data({})
@@ -68,6 +67,10 @@ def register_filter_dialog(router: Router, infra: Infra) -> None:
             "Выбери фильтры (тап снимает выбор; ничего не выбрано = любой) и нажми «Искать»:",
             reply_markup=build_filter_kb({}),
         )
+
+    router.message(Command("filter"))(open_filter)
+    if button_label:                       # ярлык reply-кнопки раздела → тот же диалог
+        router.message(F.text == button_label)(open_filter)
 
     @router.callback_query(FilterCB.filter(), FilterFlow.building)
     async def on_toggle(callback: CallbackQuery, callback_data: FilterCB, state: FSMContext) -> None:
