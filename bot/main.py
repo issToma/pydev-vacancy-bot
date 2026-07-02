@@ -16,7 +16,7 @@ from core.config import settings
 from core.infra import build_infra
 from core.tg_html import HTML_SOURCE_LIMIT, TELEGRAM_TEXT_LIMIT, to_telegram_html
 from services.dewarp.service import build_result_kb
-from services.vacancy.notifications import run_notifier
+from services.vacancy.notifications import run_notifier_supervised
 
 logging.basicConfig(level=logging.INFO)
 
@@ -100,7 +100,7 @@ async def main() -> None:
                     user_id, text[:TELEGRAM_TEXT_LIMIT], disable_web_page_preview=True
                 )
 
-    notifier_task = asyncio.create_task(run_notifier(deliver))
+    notifier_task = asyncio.create_task(run_notifier_supervised(deliver))
 
     logging.info("Бот запускается (long polling)...")
     try:

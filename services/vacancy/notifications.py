@@ -85,9 +85,33 @@ async def run_notifier(deliver: Callable[[dict], Awaitable[None]]) -> None:
         logger.info("Notifier запущен, слушаю очередь %s", NOTIFICATIONS_QUEUE)
         await asyncio.Future()      # ждём до отмены задачи (остановка бота)
     except asyncio.CancelledError:
-        pass                        # штатная остановка
+        raise                       # штатная остановка — пробрасываем супервизору
     finally:
         # закрываем соединение — сервер сам снимет потребителей; остаточные
         # ошибки teardown подавляем (канал уже мог закрыться).
         with contextlib.suppress(Exception):
             await connection.close()
+
+
+NOTIFIER_RESTART_BACKOFF = 5.0      # пауза перед перезапуском упавшего notifier, сек
+
+
+async def run_notifier_supervised(deliver: Callable[[dict], Awaitable[None]]) -> None:
+    """Супервизор: держит notifier живым, перезапуская его при падении.
+
+    Фоновая задача может умереть молча (потеря связи с брокером, неожиданное
+    исключение) — тогда уведомления тихо перестают доставляться. Обёртка ловит
+    любые ошибки, громко логирует и перезапускает с бэкоффом. Отмена (остановка
+    бота) пробрасывается и завершает супервизор штатно.
+    """
+    while True:
+        try:
+            await run_notifier(deliver)
+            return                  # вернулся без ошибки — только при отмене
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Notifier упал — перезапуск через %sс", NOTIFIER_RESTART_BACKOFF
+            )
+            await asyncio.sleep(NOTIFIER_RESTART_BACKOFF)
