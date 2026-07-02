@@ -80,6 +80,15 @@ uv run alembic upgrade head                          # применить
 uv run alembic revision --autogenerate -m "msg"      # сгенерировать по моделям
 ```
 
+## Тесты
+
+```bash
+uv run pytest
+```
+
+Оффлайн-набор (без живых сервисов): контракт реестра, `to_telegram_html`, матчинг подписок,
+rate-limit (на фейк-Redis), хелперы `/match`, эндпоинт `GET /health` (httpx + ASGITransport).
+
 ## Структура
 
 ```
