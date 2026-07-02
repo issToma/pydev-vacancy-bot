@@ -13,6 +13,7 @@ from core.contracts import Infra
 from core.models import LlmUsage
 from core.ratelimit import check_rate_limit
 from core.tg_html import HTML_SOURCE_LIMIT, TELEGRAM_TEXT_LIMIT, to_telegram_html
+from core.usage import over_budget, usage_summary
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +88,14 @@ class AskService:
     """
 
     name = "ask"
-    commands = [BotCommand(command="ask", description="вопрос по программированию (LLM)")]
+    commands = [
+        BotCommand(command="ask", description="вопрос по программированию (LLM)"),
+        BotCommand(command="usage", description="мой расход токенов LLM за сутки"),
+    ]
     help_text = (
         "/ask <вопрос> — точечный вопрос по программированию (в стиле StackOverflow).\n"
-        "  Помнит контекст последних реплик — можно уточнять. Напр.: /ask чем RabbitMQ отличается от Kafka"
+        "  Помнит контекст последних реплик — можно уточнять. Напр.: /ask чем RabbitMQ отличается от Kafka\n"
+        "/usage — сколько токенов LLM ты потратил за последние сутки"
     )
 
     def register(self, router: Router, infra: Infra) -> None:
@@ -121,6 +126,13 @@ class AskService:
                     f"{settings.ask_rate_limit_window // 60} мин). Попробуй позже."
                 )
                 return
+            # спенд-лимит: суточный бюджет токенов (контроль стоимости)
+            async with infra.session_factory() as session:
+                if await over_budget(session, user_id, settings.llm_daily_token_budget):
+                    await message.answer(
+                        "Дневной лимит токенов LLM исчерпан. Загляни в /usage; попробуй завтра."
+                    )
+                    return
 
             history = await _load_history(infra.redis, user_id)
             messages = [
@@ -175,6 +187,25 @@ class AskService:
             )
             # учёт расхода токенов (cost-control)
             await _record_usage(infra.session_factory, user_id, settings.llm_model, usage)
+
+        @router.message(Command("usage"))
+        async def usage_cmd(message: Message) -> None:
+            async with infra.session_factory() as session:
+                rows = await usage_summary(session, message.from_user.id)
+            if not rows:
+                await message.answer("За последние сутки запросов к LLM не было.")
+                return
+            lines = ["📊 Твой расход LLM за сутки:"]
+            total_in = total_out = total_n = 0
+            for service, n, t_in, t_out in rows:
+                lines.append(f"• {service}: {n} запр., токены {t_in}+{t_out}")
+                total_in += t_in
+                total_out += t_out
+                total_n += n
+            budget = settings.llm_daily_token_budget
+            tail = f" из {budget} лимита" if budget else ""
+            lines.append(f"Итого: {total_n} запр., {total_in + total_out} токенов{tail}")
+            await message.answer("\n".join(lines))
 
     def api_router(self) -> None:
         # /ask — только через бота (интерактивный streaming), REST-эндпоинта нет

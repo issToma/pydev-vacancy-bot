@@ -78,5 +78,9 @@ class Settings(BaseSettings):
     match_rate_limit: int = 5              # /match дороже /ask (БД+LLM) → строже
     match_rate_limit_window: int = 3600
 
+    # Спенд-лимит: суммарный бюджет токенов LLM на пользователя за сутки (in+out).
+    # Ограничивает СТОИМОСТЬ (в дополнение к лимиту по числу запросов). 0 — без лимита.
+    llm_daily_token_budget: int = 100000
+
 
 settings = Settings()

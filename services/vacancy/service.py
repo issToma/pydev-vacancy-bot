@@ -24,6 +24,7 @@ from core.contracts import Infra
 from core.db import get_session
 from core.ratelimit import check_rate_limit
 from core.redis import get_redis
+from core.usage import over_budget
 from services.vacancy.repo import (
     VacancyFilters,
     VacancyRow,
@@ -153,6 +154,14 @@ class VacancyService:
                     f"{settings.match_rate_limit_window // 60} мин). Попробуй позже."
                 )
                 return
+            # спенд-лимит: суточный бюджет токенов LLM (контроль стоимости)
+            async with infra.session_factory() as session:
+                if await over_budget(session, message.from_user.id, settings.llm_daily_token_budget):
+                    await state.clear()
+                    await message.answer(
+                        "Дневной лимит токенов LLM исчерпан. Загляни в /usage; попробуй завтра."
+                    )
+                    return
             await state.clear()
             async with infra.session_factory() as session:
                 await upsert_user(session, message.from_user.id, message.from_user.username)
