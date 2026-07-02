@@ -138,11 +138,7 @@ class VacancyService:
             async with infra.session_factory() as session:
                 rows = await search_vacancies(session, VacancyFilters(text=query, limit=10))
             if not rows:
-                hint = f" по названию «{query}»" if query else ""
-                await message.answer(
-                    f"Ничего не найдено{hint}. Поиск идёт по названию вакансии; "
-                    "в базе сейчас только Python-вакансии (попробуй: middle, senior, django)."
-                )
+                await message.answer("Ничего не найдено, попробуй другой запрос")
                 return
             # показываем первые 10 (по свежести)
             await message.answer(_format_vacancies(rows), disable_web_page_preview=True)
@@ -204,10 +200,7 @@ class VacancyService:
         @router.message(F.text == self.BTN_SEARCH)
         async def btn_search(message: Message, state: FSMContext) -> None:
             await state.set_state(SearchFlow.waiting_query)
-            await message.answer(
-                "Что ищем? Поиск идёт по НАЗВАНИЮ вакансии (напр.: middle, senior, django). "
-                "Показываю до 10 свежих. «☰ Меню» — отмена."
-            )
+            await message.answer("Напиши запрос — ищу по названию вакансии")
 
         @router.message(F.text == self.BTN_STACK)
         async def btn_stack(message: Message, state: FSMContext) -> None:
@@ -231,7 +224,8 @@ class VacancyService:
         # ── ввод для prompt-флоу (после кнопок: свободный текст сюда, ярлыки — в кнопки) ──
         @router.message(SearchFlow.waiting_query)
         async def on_search_query(message: Message, state: FSMContext) -> None:
-            await state.clear()
+            # состояние НЕ сбрасываем — остаёмся в поиске, ждём следующий запрос
+            # (выйти можно кнопкой раздела или «☰ Меню»)
             await _show_vacancies(message, (message.text or "").strip() or None)
 
         @router.message(SubscribeFlow.waiting_query)
