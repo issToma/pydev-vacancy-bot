@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from collections import Counter
 from dataclasses import dataclass
 
@@ -29,6 +30,44 @@ class VacancyRow:
     area: str
     employer: str
     experience: str
+    salary_min: int | None = None
+    salary_max: int | None = None
+    currency: str | None = None
+    published_at: datetime.datetime | None = None
+
+
+_CURRENCY = {"RUR": "₽", "RUB": "₽", "USD": "$", "EUR": "€", "KZT": "₸", "BYN": "Br", "UAH": "₴"}
+
+
+def _salary_line(v: VacancyRow) -> str | None:
+    """Строка зарплаты или None, если не указана."""
+    def num(n: int) -> str:
+        return f"{n:,}".replace(",", " ")     # 250000 → 250 000
+
+    if v.salary_min and v.salary_max:
+        amount = f"{num(v.salary_min)}–{num(v.salary_max)}"
+    elif v.salary_min:
+        amount = f"от {num(v.salary_min)}"
+    elif v.salary_max:
+        amount = f"до {num(v.salary_max)}"
+    else:
+        return None
+    cur = _CURRENCY.get(v.currency or "", v.currency or "")
+    return f"{amount} {cur}".strip()
+
+
+def format_vacancy_card(v: VacancyRow) -> str:
+    """Карточка вакансии: каждое поле с новой строки (зарплата/дата — если есть)."""
+    lines = [v.name, v.employer]
+    salary = _salary_line(v)
+    if salary:
+        lines.append(salary)
+    if v.area:
+        lines.append(v.area)
+    if v.published_at:
+        lines.append(v.published_at.strftime("%d.%m.%Y"))
+    lines.append(f"https://hh.ru/vacancy/{v.id}")
+    return "\n".join(lines)
 
 
 async def search_vacancies(session: AsyncSession, f: VacancyFilters) -> list[VacancyRow]:
@@ -69,7 +108,8 @@ async def search_vacancies(session: AsyncSession, f: VacancyFilters) -> list[Vac
     params["limit"] = f.limit
 
     sql = text(
-        f"SELECT id, name, area, employer, experience "
+        f"SELECT id, name, area, employer, experience, "
+        f"salary_min, salary_max, currency, published_at "
         f"FROM dev_vacancies{where} "
         f"ORDER BY published_at DESC NULLS LAST "
         f"LIMIT :limit"

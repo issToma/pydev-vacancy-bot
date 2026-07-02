@@ -9,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from core.contracts import Infra
-from services.vacancy.repo import VacancyFilters, search_vacancies
+from services.vacancy.repo import VacancyFilters, format_vacancy_card, search_vacancies
 
 
 class FilterFlow(StatesGroup):
@@ -108,9 +108,7 @@ async def _run_search(callback: CallbackQuery, data: dict, infra: Infra) -> None
             ),
         )
     if rows:
-        text = "\n\n".join(
-            f"• {v.name} — {v.employer}\n  {v.area} | https://hh.ru/vacancy/{v.id}" for v in rows
-        )
+        text = "\n\n".join(format_vacancy_card(v) for v in rows)
     else:
         text = "Ничего не найдено по выбранным фильтрам"
     # прежнюю клавиатуру удаляем целиком — активной остаётся ОДНА (новая, снизу),

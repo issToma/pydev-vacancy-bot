@@ -28,6 +28,7 @@ from core.usage import over_budget
 from services.vacancy.repo import (
     VacancyFilters,
     VacancyRow,
+    format_vacancy_card,
     search_vacancies,
     top_technologies,
 )
@@ -92,13 +93,7 @@ async def get_stack(session: AsyncSession, redis: Redis) -> list[dict]:
 
 
 def _format_vacancies(rows: list[VacancyRow]) -> str:
-    if not rows:
-        return "Ничего не найдено."
-    lines = [
-        f"• {v.name} — {v.employer}\n  {v.area} | {v.experience}\n  https://hh.ru/vacancy/{v.id}"
-        for v in rows
-    ]
-    return "\n\n".join(lines)
+    return "\n\n".join(format_vacancy_card(v) for v in rows)
 
 
 class VacancyService:
