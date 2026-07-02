@@ -64,7 +64,7 @@ def register_filter_dialog(router: Router, infra: Infra, button_label: str | Non
         await state.set_state(FilterFlow.building)
         await state.set_data({})
         await message.answer(
-            "Выбери фильтры (тап снимает выбор; ничего не выбрано = любой) и нажми «Искать»:",
+            "Отметь фильтры и запусти поиск",
             reply_markup=build_filter_kb({}),
         )
 
@@ -84,7 +84,7 @@ def register_filter_dialog(router: Router, infra: Infra, button_label: str | Non
         elif callback_data.action == "accredited":
             data["accredited"] = not data.get("accredited")      # toggle
         elif callback_data.action == "search":
-            await _run_search(callback, data, infra, state)
+            await _run_search(callback, data, infra)
             return
 
         await state.set_data(data)
@@ -96,7 +96,7 @@ def register_filter_dialog(router: Router, infra: Infra, button_label: str | Non
         await callback.answer()
 
 
-async def _run_search(callback: CallbackQuery, data: dict, infra: Infra, state: FSMContext) -> None:
+async def _run_search(callback: CallbackQuery, data: dict, infra: Infra) -> None:
     async with infra.session_factory() as session:
         rows = await search_vacancies(
             session,
@@ -112,7 +112,8 @@ async def _run_search(callback: CallbackQuery, data: dict, infra: Infra, state: 
             f"• {v.name} — {v.employer}\n  {v.area} | https://hh.ru/vacancy/{v.id}" for v in rows
         )
     else:
-        text = "Ничего не найдено по выбранным фильтрам."
-    await state.clear()
+        text = "Ничего не найдено по выбранным фильтрам"
+    # состояние НЕ сбрасываем — остаёмся в фильтрах: можно менять и искать снова
+    # (выход кнопкой раздела или «☰ Меню»)
     await callback.message.answer(text, disable_web_page_preview=True)
     await callback.answer()

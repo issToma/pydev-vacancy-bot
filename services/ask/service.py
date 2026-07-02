@@ -221,7 +221,7 @@ class AskService:
         @router.message(F.text == self.BTN_ASK)
         async def btn_ask(message: Message, state: FSMContext) -> None:
             await state.set_state(AskFlow.waiting_question)
-            await message.answer("Задай вопрос по программированию. «☰ Меню» — отмена.")
+            await message.answer("Задай вопрос по программированию")
 
         @router.message(F.text == self.BTN_USAGE)
         async def btn_usage(message: Message, state: FSMContext) -> None:
@@ -231,10 +231,10 @@ class AskService:
         # ── ввод вопроса (свободный текст в режиме ожидания) ──
         @router.message(AskFlow.waiting_question)
         async def on_question(message: Message, state: FSMContext) -> None:
+            # остаёмся в режиме вопросов (можно спрашивать подряд); выход кнопкой или «☰ Меню»
             question = (message.text or "").strip()
-            await state.clear()
             if not question:
-                await message.answer("Пустой вопрос.")
+                await message.answer("Пустой вопрос")
                 return
             await _run_ask(message, question)
 

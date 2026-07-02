@@ -167,8 +167,7 @@ class VacancyService:
         async def _start_match(message: Message, state: FSMContext) -> None:
             await state.set_state(MatchFlow.waiting_resume)
             await message.answer(
-                "Пришли текст резюме (стек, опыт, роль; можно указать город) одним сообщением — "
-                "подберу подходящие вакансии и поясню, почему. «☰ Меню» — отмена."
+                "Пришли текст резюме одним сообщением, подберу подходящие вакансии и поясню почему"
             )
 
         # ── команды (по вводу) ──
@@ -210,7 +209,7 @@ class VacancyService:
         @router.message(F.text == self.BTN_SUBSCRIBE)
         async def btn_subscribe(message: Message, state: FSMContext) -> None:
             await state.set_state(SubscribeFlow.waiting_query)
-            await message.answer("На какой запрос подписать? (напр.: python). «☰ Меню» — отмена.")
+            await message.answer("На какой запрос подписать")
 
         @router.message(F.text == self.BTN_SUBS)
         async def btn_subs(message: Message, state: FSMContext) -> None:
@@ -230,44 +229,37 @@ class VacancyService:
 
         @router.message(SubscribeFlow.waiting_query)
         async def on_subscribe_query(message: Message, state: FSMContext) -> None:
+            # остаёмся в подписке (можно добавить ещё); выход кнопкой или «☰ Меню»
             query = (message.text or "").strip()
-            await state.clear()
             if not query:
-                await message.answer("Пустой запрос — подписка не создана.")
+                await message.answer("Пустой запрос, подписка не создана")
                 return
             await _create_sub(message, query)
 
         @router.message(MatchFlow.waiting_resume)
         async def on_resume(message: Message, state: FSMContext) -> None:
+            # состояние НЕ сбрасываем — остаёмся в подборе; выход кнопкой или «☰ Меню»
             resume = (message.text or "").strip()
             if len(resume) < 20:
-                await message.answer(
-                    "Слишком коротко. Пришли текст резюме или хотя бы стек, опыт и роль."
-                )
+                await message.answer("Слишком коротко, пришли текст резюме")
                 return
             if not settings.llm_api_key:
-                await state.clear()
-                await message.answer("LLM не настроен: добавь LLM_API_KEY в .env")
+                await message.answer("LLM не настроен, добавь LLM_API_KEY в .env")
                 return
             allowed = await check_rate_limit(
                 infra.redis, f"ratelimit:{message.from_user.id}:match",
                 settings.match_rate_limit, settings.match_rate_limit_window,
             )
             if not allowed:
-                await state.clear()
                 await message.answer(
-                    f"Лимит подбора исчерпан ({settings.match_rate_limit} за "
-                    f"{settings.match_rate_limit_window // 60} мин). Попробуй позже."
+                    f"Лимит подбора исчерпан, {settings.match_rate_limit} за "
+                    f"{settings.match_rate_limit_window // 60} мин, попробуй позже"
                 )
                 return
             async with infra.session_factory() as session:
                 if await over_budget(session, message.from_user.id, settings.llm_daily_token_budget):
-                    await state.clear()
-                    await message.answer(
-                        "Дневной лимит токенов LLM исчерпан. Загляни в «📊 Мой расход»; попробуй завтра."
-                    )
+                    await message.answer("Дневной лимит токенов LLM исчерпан, попробуй завтра")
                     return
-            await state.clear()
             async with infra.session_factory() as session:
                 await upsert_user(session, message.from_user.id, message.from_user.username)
                 await session.commit()
@@ -275,7 +267,7 @@ class VacancyService:
                 "services.vacancy.tasks.match_vacancies",
                 args=[message.from_user.id, resume],
             )
-            await message.answer("🔎 Подбираю вакансии по резюме — пришлю результат через ~минуту.")
+            await message.answer("Подбираю вакансии по резюме, пришлю через минуту")
 
         @router.callback_query(SubDelCB.filter())
         async def delete_sub(callback: CallbackQuery, callback_data: SubDelCB) -> None:

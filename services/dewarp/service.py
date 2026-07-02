@@ -80,28 +80,19 @@ class DewarpService:
         @router.message(F.text == self.BTN_DEWARP)
         async def start_dewarp(message: Message, state: FSMContext) -> None:
             await state.set_state(DewarpFlow.waiting_image)
-            await message.answer(
-                "Пришли документ фото или файлом — верну выпрямленную версию.\n"
-                "Лучше как файл (📎 → File), без сжатия. «☰ Меню» — отмена."
-            )
+            await message.answer("Пришли документ фото или файлом, верну выпрямленную версию")
 
-        @router.message(DewarpFlow.waiting_image, Command("cancel"))
-        async def cancel_dewarp(message: Message, state: FSMContext) -> None:
-            await state.clear()
-            await message.answer("Отменил.")
-
-        # изображения обрабатываем ТОЛЬКО в состоянии ожидания (после /dewarp)
+        # изображения обрабатываем ТОЛЬКО в состоянии ожидания (после /dewarp).
+        # состояние НЕ сбрасываем — можно слать документы подряд; выход кнопкой или «☰ Меню»
         @router.message(DewarpFlow.waiting_image, F.photo)
         async def on_photo(message: Message, state: FSMContext) -> None:
-            await state.clear()
             await _enqueue(message, message.photo[-1].file_id)
 
         @router.message(DewarpFlow.waiting_image, F.document)
         async def on_document(message: Message, state: FSMContext) -> None:
             if not (message.document.mime_type or "").startswith("image/"):
-                await message.answer("Это не изображение. Пришли фото/файл-картинку или /cancel.")
+                await message.answer("Это не изображение, пришли фото или файл-картинку")
                 return
-            await state.clear()
             await _enqueue(message, message.document.file_id)
 
         # кнопка «получить файлом» под фото-результатом

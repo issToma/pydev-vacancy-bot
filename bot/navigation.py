@@ -68,6 +68,10 @@ def build_navigation_router(services: list[ServiceModule]) -> Router:
     async def menu(message: Message, state: FSMContext) -> None:
         await show_main(message, state)
 
+    @router.message(Command("cancel"))
+    async def cancel(message: Message, state: FSMContext) -> None:
+        await show_main(message, state)
+
     @router.message(F.text == MENU_LABEL)
     async def back_to_menu(message: Message, state: FSMContext) -> None:
         await show_main(message, state)
