@@ -113,9 +113,14 @@ async def _run_search(callback: CallbackQuery, data: dict, infra: Infra) -> None
         )
     else:
         text = "Ничего не найдено по выбранным фильтрам"
+    # у прежней клавиатуры убираем кнопки — активной остаётся ОДНА (новая, снизу),
+    # чтобы не было двух рабочих клавиатур с рассинхроном галочек
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
     await callback.message.answer(text, disable_web_page_preview=True)
-    # клавиатуру фильтров дублируем ПОД результатами (с текущими галочками) —
+    # клавиатуру фильтров показываем ПОД результатами (с текущими галочками) —
     # не нужно скроллить вверх; состояние НЕ сбрасываем, можно менять и искать снова
     await callback.message.answer("Изменить фильтры", reply_markup=build_filter_kb(data))
-    await callback.answer()
     await callback.answer()
