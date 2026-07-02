@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +17,12 @@ MATCH_SYSTEM_PROMPT = (
     "и пронумерованный список вакансий-кандидатов. Выбери топ-5 наиболее подходящих. "
     "Для каждой кратко объясни: почему подходит и чего кандидату не хватает. "
     "Ссылайся на вакансии по номеру из списка. НЕ придумывай вакансии вне списка. "
-    "Отвечай по делу, без воды."
+    "НЕ выводи числовой id вакансии в квадратных скобках — он нужен только внутри "
+    "ссылки https://hh.ru/vacancy/<id>. Отвечай по делу, без воды."
 )
+
+# Числовой id в квадратных скобках (напр. «[134182839]») — служебный, пользователю не нужен.
+_BRACKET_ID = re.compile(r"\s*\[\d+\]")
 
 
 async def extract_area(session: AsyncSession, resume: str) -> str | None:
@@ -99,7 +104,9 @@ async def rank_with_llm(resume: str, cands: list[dict]) -> tuple[str, object]:
     if settings.ask_reasoning_effort:
         kwargs["reasoning_effort"] = settings.ask_reasoning_effort
     resp = await llm_client.chat.completions.create(**kwargs)
-    return resp.choices[0].message.content or "", resp.usage
+    # подчищаем [id] из текста (id остаётся в ссылке hh.ru/vacancy/<id>)
+    answer = _BRACKET_ID.sub("", resp.choices[0].message.content or "")
+    return answer, resp.usage
 
 
 def extract_stack(resume: str) -> list[str]:
