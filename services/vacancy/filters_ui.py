@@ -113,10 +113,10 @@ async def _run_search(callback: CallbackQuery, data: dict, infra: Infra) -> None
         )
     else:
         text = "Ничего не найдено по выбранным фильтрам"
-    # у прежней клавиатуры убираем кнопки — активной остаётся ОДНА (новая, снизу),
-    # чтобы не было двух рабочих клавиатур с рассинхроном галочек
+    # прежнюю клавиатуру удаляем целиком — активной остаётся ОДНА (новая, снизу),
+    # чтобы не было двух рабочих клавиатур и соблазна тапать вверх
     try:
-        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.delete()
     except TelegramBadRequest:
         pass
     await callback.message.answer(text, disable_web_page_preview=True)
