@@ -6,12 +6,10 @@ from collections.abc import Iterable
 from core.contracts import ServiceModule
 from services.ask.service import AskService
 from services.dewarp.service import DewarpService
-from services.ping import PingService
 from services.vacancy.service import VacancyService
 
 # Единственная точка, которую правят при добавлении сервиса: +1 строка сюда.
 SERVICES: list[ServiceModule] = [
-    PingService(),
     VacancyService(),
     DewarpService(),
     AskService(),
