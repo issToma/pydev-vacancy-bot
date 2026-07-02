@@ -136,7 +136,9 @@ class VacancyService:
                 await message.answer("Ничего не найдено, попробуй другой запрос")
                 return
             # показываем первые 10 (по свежести)
-            await message.answer(_format_vacancies(rows), disable_web_page_preview=True)
+            await message.answer(
+                _format_vacancies(rows), parse_mode="HTML", disable_web_page_preview=True
+            )
 
         async def _show_stack(message: Message) -> None:
             async with infra.session_factory() as session:

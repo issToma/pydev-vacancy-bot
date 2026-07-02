@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import html
 from collections import Counter
 from dataclasses import dataclass
 
@@ -57,16 +58,23 @@ def _salary_line(v: VacancyRow) -> str | None:
 
 
 def format_vacancy_card(v: VacancyRow) -> str:
-    """Карточка вакансии: каждое поле с новой строки (зарплата/дата — если есть)."""
-    lines = [v.name, v.employer]
+    """Карточка вакансии в Telegram-HTML.
+
+    Название / Компания / Зарплата (если есть) — по строке;
+    Город, Дата, кликабельная «Ссылка» — одной строкой через запятую.
+    Отправлять с parse_mode=HTML.
+    """
+    lines = [html.escape(v.name), html.escape(v.employer)]
     salary = _salary_line(v)
     if salary:
-        lines.append(salary)
+        lines.append(html.escape(salary))
+    meta = []
     if v.area:
-        lines.append(v.area)
+        meta.append(html.escape(v.area))
     if v.published_at:
-        lines.append(v.published_at.strftime("%d.%m.%Y"))
-    lines.append(f"https://hh.ru/vacancy/{v.id}")
+        meta.append(v.published_at.strftime("%d.%m.%Y"))
+    meta.append(f'<a href="https://hh.ru/vacancy/{v.id}">Ссылка</a>')
+    lines.append(", ".join(meta))
     return "\n".join(lines)
 
 

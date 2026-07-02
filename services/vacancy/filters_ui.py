@@ -117,7 +117,7 @@ async def _run_search(callback: CallbackQuery, data: dict, infra: Infra) -> None
         await callback.message.delete()
     except TelegramBadRequest:
         pass
-    await callback.message.answer(text, disable_web_page_preview=True)
+    await callback.message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
     # клавиатуру фильтров показываем ПОД результатами (с текущими галочками) —
     # не нужно скроллить вверх; состояние НЕ сбрасываем, можно менять и искать снова
     await callback.message.answer("Изменить фильтры", reply_markup=build_filter_kb(data))
