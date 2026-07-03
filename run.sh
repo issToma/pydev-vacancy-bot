@@ -8,7 +8,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 echo ">> Инфраструктура (docker: postgres/redis/rabbitmq/minio)…"
-docker compose up -d postgres redis rabbitmq minio
+sudo docker compose up -d postgres redis rabbitmq minio
 
 echo ">> Миграции БД…"
 uv run alembic upgrade head
