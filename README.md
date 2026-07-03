@@ -70,15 +70,21 @@ cp .env.example .env
 # 4. Миграции БД
 uv run alembic upgrade head
 
-# 5. Запустить процессы (в отдельных терминалах):
-uv run uvicorn api.main:app --reload                              # REST API
+# 5. Запустить в двух отдельных терминалах — бот и воркер:
 uv run python -m bot.main                                        # бот (long polling)
-uv run celery -A core.celery_app:celery_app worker -B -l info    # воркер + Beat
+uv run celery -A core.celery_app:celery_app worker -B -l info    # воркер + Beat (задачи, скрап)
+```
+
+REST-слой FastAPI **поднимать не обязательно** — бот ходит в инфраструктуру напрямую, а не через HTTP. Если нужен API/`/health`:
+```bash
+uv run uvicorn api.main:app --reload
 ```
 
 - **Ключи** (`TELEGRAM_BOT_TOKEN`, `LLM_API_KEY`) — только в `.env` (в git не коммитится).
 - `LLM_API_KEY` бесплатно берётся в Google AI Studio (`aistudio.google.com`). Без ключа `/ask` и `/match` ответят «LLM не настроен», остальное работает.
-- **Воркер нужен** для `/dewarp`, `/match` и периодического скрапинга; бот сам обслуживает `/vacancies`, `/stack`, `/ask` и т.д.
+- **Воркер нужен** для `/dewarp`, `/match` и периодического скрапинга; бот сам обслуживает вакансии, `/stack`, `/ask` и навигацию.
+- **Один бот на токен:** не запускай второй экземпляр с тем же токеном (в т.ч. docker-контейнер `bot`) параллельно локальному — Telegram отдаёт long-poll только одному (иначе `409 Conflict`).
+- **Скрап hh.ru** работает с российского IP; из-за границы/через VPN hh может отдавать заглушку (см. журнал).
 
 ## Конфигурация
 
