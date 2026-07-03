@@ -12,6 +12,7 @@ services:
   # ── Инфраструктура ─────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: vacancy
       POSTGRES_PASSWORD: vacancy
@@ -28,6 +29,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -38,6 +40,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: vacancy
       RABBITMQ_DEFAULT_PASS: vacancy
@@ -52,6 +55,7 @@ services:
 
   minio:
     image: minio/minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: vacancy

@@ -55,7 +55,9 @@ LLM через OpenAI-совместимый API (Google Gemini по умолч�
 
 ## Запуск (локальная разработка)
 
-Требуется [uv](https://docs.astral.sh/uv/) и Docker (для инфраструктуры).
+Требуется [uv](https://docs.astral.sh/uv/) и Docker (для инфраструктуры). Пользователь должен
+иметь доступ к docker без sudo (`sudo usermod -aG docker $USER`, затем перелогиниться). Инфра-
+контейнеры помечены `restart: unless-stopped` — после перезагрузки поднимаются сами.
 
 ```bash
 # 1. Зависимости
