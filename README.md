@@ -66,8 +66,9 @@ uv sync
 # 2. Инфраструктура в Docker (Postgres на хост-порту 5433, Redis, RabbitMQ, MinIO)
 docker compose up -d postgres redis rabbitmq minio
 
-# 3. Конфигурация: скопировать пример и заполнить TELEGRAM_BOT_TOKEN и LLM_API_KEY
-cp .env.example .env
+# 3. Конфигурация: создать .env из примера (-n не перезапишет существующий!) и
+#    заполнить TELEGRAM_BOT_TOKEN и LLM_API_KEY
+cp -n .env.example .env
 
 # 4. Миграции БД
 uv run alembic upgrade head
