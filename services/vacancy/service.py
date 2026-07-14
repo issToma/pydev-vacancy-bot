@@ -28,10 +28,14 @@ from core.usage import over_budget
 from services.vacancy.repo import (
     VacancyFilters,
     VacancyRow,
+    count_dev_vacancies,
     format_vacancy_card,
+    salary_rows,
     search_vacancies,
     top_technologies,
 )
+from services.vacancy.fx import get_fx_rates
+from services.vacancy.salary_stats import GRADE_NONE, GRADE_OTHER, aggregate_by_grade
 from services.vacancy.filters_ui import register_filter_dialog
 from services.vacancy.subs import (
     create_subscription,
@@ -96,6 +100,19 @@ def _format_vacancies(rows: list[VacancyRow]) -> str:
     return "\n\n".join(format_vacancy_card(v) for v in rows)
 
 
+def _fmt_rub(n: int) -> str:
+    return f"{n:,}".replace(",", " ")          # 220000 → 220 000
+
+
+def _fmt_rate(x: float) -> str:
+    """Курс валюты с адаптивной точностью: у тенге/сума он сильно меньше 1."""
+    if x >= 100:
+        return f"{x:.0f}"
+    if x >= 1:
+        return f"{x:.1f}"
+    return f"{x:.4f}".rstrip("0")              # 0.0064, 0.17, 0.9
+
+
 class VacancyService:
     """Vacancy Radar: поиск/аналитика вакансий, подписки, подбор по резюме."""
 
@@ -105,24 +122,27 @@ class VacancyService:
     BTN_SEARCH = "🔎 Поиск"
     BTN_FILTER = "🎛 Фильтры"
     BTN_STACK = "📊 Топ стек"
+    BTN_SALARY = "💰 Зарплаты по грейдам"
     BTN_SUBSCRIBE = "🔔 Подписаться"
     BTN_SUBS = "📜 Мои подписки"
     BTN_MATCH = "🎯 Подбор по резюме"
-    menu_buttons = [BTN_SEARCH, BTN_FILTER, BTN_STACK, BTN_SUBSCRIBE, BTN_SUBS, BTN_MATCH]
+    menu_buttons = [BTN_SEARCH, BTN_FILTER, BTN_STACK, BTN_SALARY, BTN_SUBSCRIBE, BTN_SUBS, BTN_MATCH]
 
     # команды (работают по вводу; в /-меню не показываем — навигация кнопками)
     commands = [
         BotCommand(command="vacancies", description="поиск вакансий по разработке"),
         BotCommand(command="filter", description="подбор фильтров кнопками"),
         BotCommand(command="stack", description="топ востребованных технологий"),
+        BotCommand(command="salaries", description="средняя/медианная ЗП по грейдам"),
         BotCommand(command="subscribe", description="подписка на новые вакансии"),
         BotCommand(command="subscriptions", description="мои подписки"),
         BotCommand(command="match", description="подбор вакансий по резюме (LLM)"),
     ]
     help_text = (
         "🔎 Поиск — вакансии по названию · 🎛 Фильтры — регион/формат/аккредитация\n"
-        "📊 Топ стек — востребованные технологии · 🔔 Подписаться — уведомления о новых\n"
-        "📜 Мои подписки — список/удаление · 🎯 Подбор по резюме — подбор через LLM"
+        "📊 Топ стек — востребованные технологии · 💰 Зарплаты — средняя/медиана по грейдам\n"
+        "🔔 Подписаться — уведомления о новых · 📜 Мои подписки — список/удаление\n"
+        "🎯 Подбор по резюме — подбор через LLM"
     )
 
     def register(self, router: Router, infra: Infra) -> None:
@@ -145,6 +165,50 @@ class VacancyService:
                 rows = await get_stack(session, infra.redis)
             lines = [f"{r['pct']}% — {r['technology']}" for r in rows[:20]]
             await message.answer("Топ технологий (dev-вакансии):\n\n" + "\n".join(lines))
+
+        async def _show_salaries(message: Message) -> None:
+            rates = await get_fx_rates(infra.redis)
+            async with infra.session_factory() as session:
+                rows = await salary_rows(session)
+                total = await count_dev_vacancies(session)
+            stats = aggregate_by_grade(rows, rates)
+            if not stats:
+                await message.answer("Нет вакансий с указанной зарплатой")
+                return
+            grades = {s.grade for s in stats}
+            lines = [
+                "<b>💰 Python — зарплаты по грейдам</b>, в рублях",
+                "<i>грейд определяется по названию вакансии</i>",
+            ]
+            for s in stats:
+                lines.append("")
+                lines.append(f"<b>{s.grade}</b> · {s.count}")
+                lines.append(
+                    f"средняя <b>{_fmt_rub(s.mean_rub)}</b> · "
+                    f"медиана <b>{_fmt_rub(s.median_rub)}</b>"
+                )
+
+            # служебный подвал — в цитату-блок, читается как приглушённая сноска
+            counted = sum(s.count for s in stats)
+            note = [f"учтено {counted} из {total} · без указания ЗП: {total - len(rows)}"]
+            # курс показываем для валют, что реально встречаются в данных (не только $/€);
+            # рубли и валюты без курса ЦБ не показываем. USD/EUR — вперёд, дальше по алфавиту.
+            present = sorted(
+                {(c or "RUR").upper() for *_, c in rows} - {"RUR", "RUB"},
+                key=lambda c: (c not in ("USD", "EUR"), c),
+            )
+            fx = [f"{c} {_fmt_rate(rates[c])}" for c in present if c in rates]
+            if fx:
+                as_of = (rates.get("_as_of") or "")[:10]
+                note.append(f"курс ЦБ{(' ' + as_of) if as_of else ''}: " + " · ".join(fx))
+            if GRADE_OTHER in grades:
+                note.append(f"{GRADE_OTHER} — тимлид, хед, архитектор, principal")
+            if GRADE_NONE in grades:
+                note.append(f"{GRADE_NONE} — в названии нет junior/middle/senior")
+            lines.append("")
+            lines.append("<blockquote>" + "\n".join(note) + "</blockquote>")
+
+            await message.answer("\n".join(lines), parse_mode="HTML")
 
         async def _create_sub(message: Message, query: str) -> None:
             async with infra.session_factory() as session:
@@ -176,6 +240,10 @@ class VacancyService:
         async def cmd_stack(message: Message) -> None:
             await _show_stack(message)
 
+        @router.message(Command("salaries"))
+        async def cmd_salaries(message: Message) -> None:
+            await _show_salaries(message)
+
         @router.message(Command("subscribe"))
         async def cmd_subscribe(message: Message) -> None:
             query = message.text.partition(" ")[2].strip()
@@ -202,6 +270,11 @@ class VacancyService:
         async def btn_stack(message: Message, state: FSMContext) -> None:
             await state.clear()
             await _show_stack(message)
+
+        @router.message(F.text == self.BTN_SALARY)
+        async def btn_salaries(message: Message, state: FSMContext) -> None:
+            await state.clear()
+            await _show_salaries(message)
 
         @router.message(F.text == self.BTN_SUBSCRIBE)
         async def btn_subscribe(message: Message, state: FSMContext) -> None:

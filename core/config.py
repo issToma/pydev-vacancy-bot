@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # TTL кэша топа технологий, секунды.
     stack_cache_ttl: int = 3600
 
+    # Курс валют ЦБ РФ (для аналитики зарплат по грейдам). JSON-зеркало,
+    # рублей за единицу валюты. ЦБ обновляет курс раз в сутки → кэшируем на 6 ч.
+    cbr_fx_url: str = "https://www.cbr-xml-daily.ru/daily_json.js"
+    fx_cache_ttl: int = 21600
+
     # RabbitMQ для прямых уведомлений (aio-pika producer/consumer).
     rabbitmq_url: str = "amqp://vacancy:vacancy@localhost:5672/"
 

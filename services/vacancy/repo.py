@@ -126,6 +126,30 @@ async def search_vacancies(session: AsyncSession, f: VacancyFilters) -> list[Vac
     return [VacancyRow(*r) for r in rows]
 
 
+async def count_dev_vacancies(session: AsyncSession) -> int:
+    """Сколько всего вакансий в dev-срезе (для показателя покрытия зарплатами)."""
+    return (await session.execute(text("SELECT count(*) FROM dev_vacancies"))).scalar() or 0
+
+
+async def salary_rows(
+    session: AsyncSession,
+) -> list[tuple[str, int | None, int | None, str | None]]:
+    """Все dev-вакансии с указанной зарплатой: (name, salary_min, salary_max, currency).
+
+    Берём только строки, где есть хотя бы одна из границ вилки — остальные в
+    аналитику зарплат всё равно не идут.
+    """
+    rows = (
+        await session.execute(
+            text(
+                "SELECT name, salary_min, salary_max, currency FROM dev_vacancies "
+                "WHERE salary_min IS NOT NULL OR salary_max IS NOT NULL"
+            )
+        )
+    ).all()
+    return [(r[0], r[1], r[2], r[3]) for r in rows]
+
+
 @dataclass(frozen=True)
 class TechStat:
     technology: str
