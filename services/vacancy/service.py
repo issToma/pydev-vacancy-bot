@@ -188,9 +188,11 @@ class VacancyService:
                     f"медиана <b>{_fmt_rub(s.median_rub)}</b>"
                 )
 
-            # служебный подвал — в цитату-блок, читается как приглушённая сноска
+            # служебный подвал — в цитату-блок, разбитый на подписанные мини-секции
+            # (покрытие / курс / легенда), чтобы не сливалось в мешанину.
             counted = sum(s.count for s in stats)
-            note = [f"учтено {counted} из {total} · без указания ЗП: {total - len(rows)}"]
+            note = ["<b>Покрытие</b>", f"учтено {counted} из {total} · без ЗП {total - len(rows)}"]
+
             # курс показываем для валют, что реально встречаются в данных (не только $/€);
             # рубли и валюты без курса ЦБ не показываем. USD/EUR — вперёд, дальше по алфавиту.
             present = sorted(
@@ -199,12 +201,18 @@ class VacancyService:
             )
             fx = [f"{c} {_fmt_rate(rates[c])}" for c in present if c in rates]
             if fx:
-                as_of = (rates.get("_as_of") or "")[:10]
-                note.append(f"курс ЦБ{(' ' + as_of) if as_of else ''}: " + " · ".join(fx))
+                iso = (rates.get("_as_of") or "")[:10]
+                as_of = ".".join(reversed(iso.split("-"))) if iso else ""   # 2026-07-03 → 03.07.2026
+                note += ["", "<b>Курс ЦБ</b>" + (f" · {as_of}" if as_of else ""), " · ".join(fx)]
+
+            legend = []
             if GRADE_OTHER in grades:
-                note.append(f"{GRADE_OTHER} — тимлид, хед, архитектор, principal")
+                legend.append(f"{GRADE_OTHER} — тимлид, хед, архитектор, principal")
             if GRADE_NONE in grades:
-                note.append(f"{GRADE_NONE} — в названии нет junior/middle/senior")
+                legend.append(f"{GRADE_NONE} — нет junior/middle/senior в названии")
+            if legend:
+                note += ["", "<b>Обозначения</b>", *legend]
+
             lines.append("")
             lines.append("<blockquote>" + "\n".join(note) + "</blockquote>")
 
