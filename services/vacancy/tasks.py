@@ -38,6 +38,9 @@ async def _upsert_batch(session_factory: async_sessionmaker, batch: list[dict]) 
     """
     # Скрапер кладёт status='available' в каждую строку — убираем: статус ведёт приложение.
     rows = [{k: v for k, v in row.items() if k not in APP_OWNED} for row in batch]
+    # Один UPSERT не может обновить одну целевую строку дважды (CardinalityViolationError),
+    # поэтому страхуемся от дублей по id внутри батча — последнее вхождение побеждает.
+    rows = list({row["id"]: row for row in rows}.values())
 
     stmt = pg_insert(VacancyScraped).values(rows)
     # Обновляем ТОЛЬКО реально вставляемые колонки (ключи rows), кроме PK.

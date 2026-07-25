@@ -166,6 +166,23 @@ def _parse_list_ids(state: dict) -> tuple[list[tuple[int, str]], int]:
     return items, total
 
 
+def _dedup_listed(items: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Дедуп собранных (id, url) за прогон, с сохранением порядка (первое вхождение).
+
+    hh переупорядочивает свежую выдачу между запросами соседних страниц, поэтому
+    один и тот же vacancyId может прийти на двух страницах. Без дедупа обе копии
+    доходят до одного UPSERT-батча → Postgres CardinalityViolationError
+    («ON CONFLICT DO UPDATE cannot affect row a second time»).
+    """
+    seen: set[int] = set()
+    out: list[tuple[int, str]] = []
+    for vid, url in items:
+        if vid not in seen:
+            seen.add(vid)
+            out.append((vid, url))
+    return out
+
+
 def _address_str(addr: dict | None) -> str | None:
     if not addr:
         return None
@@ -262,6 +279,9 @@ async def scrape_new_vacancies(existing_ids: set, on_batch=None) -> int:
             logger.info("Страница %s: %s вакансий (всего по фильтру ~%s)", page_num + 1, len(items), total)
             listed.extend(items)
             await _human_delay()
+
+        # дедуп за прогон: один id мог прийти на двух страницах (hh тасует выдачу)
+        listed = _dedup_listed(listed)
 
         # 2) Отбрасываем уже сохранённые
         new_items = [(vid, url) for vid, url in listed if vid not in existing_ids]
