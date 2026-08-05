@@ -12,7 +12,9 @@ class VacancyScraped(Base):
     """Вакансия, собранная скрейпером (таблица vacancies_scraped).
 
     id — идентификатор вакансии с hh (не автоинкремент).
-    Поля status/apply_flag — рабочие поля приложения; скрейпер их не перезаписывает.
+    vacancy_status — состояние вакансии на hh (new/available/…); apply_status —
+    статус НАШЕГО отклика (pending/applied/manual/archived/resume_hidden/error).
+    Скрейпер эти поля не перезаписывает (см. APP_OWNED в tasks.py).
     """
 
     __tablename__ = "vacancies_scraped"
@@ -41,9 +43,9 @@ class VacancyScraped(Base):
     has_test: Mapped[bool | None]
     key_skills: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     languages: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
-    status: Mapped[str] = mapped_column(String(16), server_default=text("'new'"))
+    vacancy_status: Mapped[str] = mapped_column(String(16), server_default=text("'new'"))
     archived: Mapped[bool | None]
-    apply_flag: Mapped[bool | None] = mapped_column(server_default=text("false"))
+    apply_status: Mapped[str | None] = mapped_column(String(20), server_default=text("'pending'"))
 
 
 class RuArea(Base):

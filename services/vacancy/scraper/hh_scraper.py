@@ -246,7 +246,7 @@ def parse_detail(state: dict, role_map: dict) -> dict | None:
         "key_skills": list(key_skills) or None,
         "languages": _languages(vv),
         "archived": (vv.get("status") or {}).get("archived"),
-        "status": "available",  # деталь получена → доступна
+        "vacancy_status": "available",  # деталь получена → вакансия доступна на hh
     }
 
 
