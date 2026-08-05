@@ -22,8 +22,9 @@ TELEGRAM_TEXT_LIMIT = 4096
 
 logger = logging.getLogger(__name__)
 
-# Поля, которыми владеет приложение, — скрапер их НЕ выставляет и НЕ перезаписывает.
-APP_OWNED = {"vacancy_status", "apply_status"}
+# apply_status — статус НАШЕГО отклика; им владеет тулза автооткликов, скрапер его
+# НЕ пишет. vacancy_status пишет сам скрапер ('available'), поэтому в APP_OWNED его нет.
+APP_OWNED = {"apply_status"}
 
 # Single-flight lock: не запускаем второй скрап, пока идёт первый (наложение расписаний Beat).
 SCRAPE_LOCK_KEY = "lock:scrape_vacancies"
@@ -34,9 +35,9 @@ SCRAPE_LOCK_TTL = 900
 
 async def _upsert_batch(session_factory: async_sessionmaker, batch: list[dict]) -> None:
     """Записать батч вакансий: новые — INSERT, существующие — UPDATE данных,
-    КРОМЕ полей приложения (vacancy_status/apply_status). updated_at бампается.
+    КРОМЕ apply_status (им владеет тулза откликов). vacancy_status пишет скрапер.
     """
-    # Скрапер кладёт vacancy_status='available' — убираем: этими полями владеет приложение.
+    # apply_status убираем: статус нашего отклика ведёт приложение, а не скрапер.
     rows = [{k: v for k, v in row.items() if k not in APP_OWNED} for row in batch]
     # Один UPSERT не может обновить одну целевую строку дважды (CardinalityViolationError),
     # поэтому страхуемся от дублей по id внутри батча — последнее вхождение побеждает.
@@ -44,7 +45,7 @@ async def _upsert_batch(session_factory: async_sessionmaker, batch: list[dict]) 
 
     stmt = pg_insert(VacancyScraped).values(rows)
     # Обновляем ТОЛЬКО реально вставляемые колонки (ключи rows), кроме PK.
-    # vacancy_status/apply_status в rows отсутствуют (APP_OWNED) → в UPDATE не попадут.
+    # apply_status в rows отсутствует (APP_OWNED) → в UPDATE не попадёт.
     # Берём значения из «виртуальной» строки excluded (то, что пытались вставить).
     insert_keys = rows[0].keys()
     update_cols = {key: stmt.excluded[key] for key in insert_keys if key != "id"}
