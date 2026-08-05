@@ -14,7 +14,7 @@ class VacancyScraped(Base):
     id — идентификатор вакансии с hh (не автоинкремент).
     vacancy_status — состояние вакансии на hh: available (пишет скрапер) / archived
     (ставит тулза откликов, встретив архив). apply_status — статус НАШЕГО отклика:
-    pending / applied / manual / error (им владеет тулза, см. APP_OWNED в tasks.py).
+    pending / applied / manual / error / skipped (владеет тулза, см. APP_OWNED в tasks.py).
     """
 
     __tablename__ = "vacancies_scraped"
