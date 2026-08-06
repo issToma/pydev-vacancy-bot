@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -363,7 +364,7 @@ class VacancyService:
     def api_router(self) -> APIRouter:
         router = APIRouter()
 
-        @router.get("/vacancies")
+        @router.get("/vacancies", tags=["Вакансии"])
         async def list_vacancies(
             text: str | None = None,
             area: str | None = None,
@@ -386,16 +387,18 @@ class VacancyService:
             )
             return [vars(r) for r in rows]
 
-        @router.get("/stack")
+        @router.get("/stack", tags=["Аналитика"])
         async def stack(
             session: AsyncSession = Depends(get_session),
             redis: Redis = Depends(get_redis),
         ) -> list[dict]:
             return await get_stack(session, redis)
 
-        @router.post("/subscriptions")
+        # Depends() на Pydantic-модели разворачивает её поля в отдельные query-
+        # параметры (в Swagger — раздельные инпуты), а не один JSON-body.
+        @router.post("/subscriptions", tags=["Подписки"])
         async def create_sub(
-            body: SubscriptionIn,
+            body: Annotated[SubscriptionIn, Depends()],
             session: AsyncSession = Depends(get_session),
         ) -> dict:
             await upsert_user(session, body.user_id, body.username)
@@ -403,7 +406,7 @@ class VacancyService:
             await session.commit()
             return {"id": sub.id, "user_id": body.user_id, "filter": sub.filter}
 
-        @router.get("/subscriptions/{user_id}")
+        @router.get("/subscriptions/{user_id}", tags=["Подписки"])
         async def list_subs(
             user_id: int, session: AsyncSession = Depends(get_session)
         ) -> list[dict]:

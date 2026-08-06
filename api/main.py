@@ -2,10 +2,19 @@ from fastapi import FastAPI
 
 from bot.registry import SERVICES, validate_registry
 
-app = FastAPI(title="vacancy-bot API")
+# Порядок и описания групп ручек в Swagger UI. Теги проставляются на самих
+# роутах (tags=[...]); здесь — только человекочитаемые заголовки и очерёдность.
+TAGS_METADATA = [
+    {"name": "Вакансии", "description": "Поиск вакансий по фильтрам."},
+    {"name": "Аналитика", "description": "Агрегаты по вакансиям (топ технологий)."},
+    {"name": "Подписки", "description": "Подписки пользователя на фильтры вакансий."},
+    {"name": "Служебное", "description": "Технические эндпоинты (проверка живости)."},
+]
+
+app = FastAPI(title="vacancy-bot API", openapi_tags=TAGS_METADATA)
 
 
-@app.get("/health")
+@app.get("/health", tags=["Служебное"])
 async def health() -> dict[str, str]:
     """Проверка живости сервиса (для docker healthcheck и мониторинга)."""
     return {"status": "ok"}

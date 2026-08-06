@@ -86,9 +86,19 @@ uv run python -m bot.main                                        # бот (long 
 uv run celery -A core.celery_app:celery_app worker -B -l info    # воркер + Beat (задачи, скрап)
 ```
 
-REST-слой FastAPI **поднимать не обязательно** — бот ходит в инфраструктуру напрямую, а не через HTTP. Если нужен API/`/health`:
+REST-слой FastAPI **поднимать не обязательно** — бот ходит в инфраструктуру напрямую, а не через HTTP. Если нужен API/`/health` или **Swagger UI**:
 ```bash
+uv run uvicorn api.main:app --host 127.0.0.1 --port 8000
+# c авто-перезагрузкой при правках кода:
 uv run uvicorn api.main:app --reload
+```
+Документация API (автогенерация FastAPI), пока сервер запущен:
+- **Swagger UI:** http://127.0.0.1:8000/docs
+- ReDoc: http://127.0.0.1:8000/redoc · OpenAPI JSON: http://127.0.0.1:8000/openapi.json
+
+Погасить сервер (по порту):
+```bash
+kill $(ss -ltnp 2>/dev/null | grep :8000 | grep -oP 'pid=\K[0-9]+')
 ```
 
 - **Ключи** (`TELEGRAM_BOT_TOKEN`, `LLM_API_KEY`) — только в `.env` (в git не коммитится).
