@@ -10,7 +10,19 @@ GRADE_MIDDLE = "Middle"
 GRADE_SENIOR = "Senior"
 GRADE_OTHER = "Лиды и выше"
 GRADE_NONE = "Грейд не указан"
-GRADE_ORDER = [GRADE_JUNIOR, GRADE_MIDDLE, GRADE_SENIOR, GRADE_OTHER, GRADE_NONE]
+GRADE_NON_DEV = "Не разработчик"  # роль не про разработку (Data/ML/DevOps, аналитика, прочее)
+GRADE_ORDER = [GRADE_JUNIOR, GRADE_MIDDLE, GRADE_SENIOR, GRADE_OTHER, GRADE_NONE, GRADE_NON_DEV]
+
+# Роли hh, которые считаем разработкой. "96" — тот же «Программист, разработчик»,
+# но иногда лежит сырым id (скрапер не всегда домапливает id→название). Всё
+# остальное (Дата-сайентист=165, DevOps, «Другое»=40, аналитика…) — не разработка.
+_DEV_ROLES = {"Программист, разработчик", "Руководитель группы разработки", "96"}
+
+
+def is_developer(roles: list[str] | None) -> bool:
+    """True, если среди professional_role есть роль разработки. Пустая роль → не
+    разработчик (не можем подтвердить — не портим чистоту грейдовых групп)."""
+    return bool(roles) and any(r in _DEV_ROLES for r in roles)
 
 # Ключевые слова в названии (регистр игнорируем). Название паддим пробелами,
 # поэтому " sr"/" jr" ловятся как отдельные токены, а не внутри слов (usr, ...).
@@ -61,41 +73,62 @@ def representative_rub(
     return midpoint * rate
 
 
+def centered_band(vals: list[float]) -> tuple[float, float]:
+    """Симметричная вокруг медианы вилка, покрывающая ~50% значений: median ± MAD.
+
+    MAD (median absolute deviation) — медиана модулей отклонений от медианы. По
+    построению половина значений лежит внутри [median−MAD, median+MAD], поэтому
+    вилка всегда центрирована на медиане (в отличие от p25–p75, которую скос
+    зарплат уводит вбок) и устойчива к выбросам.
+    """
+    med = statistics.median(vals)
+    mad = statistics.median([abs(x - med) for x in vals])
+    return med - mad, med + mad
+
+
 @dataclass(frozen=True)
 class GradeSalary:
     grade: str
     count: int          # вакансий с зарплатой в группе
     mean_rub: int
     median_rub: int
+    band_lo_rub: int    # нижняя граница центрированной вилки (median − MAD)
+    band_hi_rub: int    # верхняя граница центрированной вилки (median + MAD)
 
 
 def aggregate_by_grade(
-    rows: list[tuple[str, int | None, int | None, str | None]],
+    rows: list[tuple[str, int | None, int | None, str | None, list[str] | None]],
     rates: dict[str, float],
 ) -> list[GradeSalary]:
-    """Считает среднюю и медианную зарплату (в рублях) по каждому грейду.
+    """Считает среднюю/медианную зарплату и вилку (в рублях) по каждой группе.
 
-    rows — кортежи (name, salary_min, salary_max, currency). Вакансии без
-    зарплаты/без курса валюты пропускаются. Пустые группы не возвращаются.
+    rows — кортежи (name, salary_min, salary_max, currency, professional_role).
+    Не-разработчики (по роли) идут в отдельную группу GRADE_NON_DEV; разработчики
+    делятся по грейду из названия — так «Грейд не указан» содержит только девелоперов.
+    Вакансии без зарплаты/без курса валюты пропускаются. Пустые группы не возвращаются.
     """
     buckets: dict[str, list[float]] = {g: [] for g in GRADE_ORDER}
-    for name, salary_min, salary_max, currency in rows:
+    for name, salary_min, salary_max, currency, roles in rows:
         rub = representative_rub(salary_min, salary_max, currency, rates)
         if rub is None:
             continue
-        buckets[detect_grade(name)].append(rub)
+        grade = detect_grade(name) if is_developer(roles) else GRADE_NON_DEV
+        buckets[grade].append(rub)
 
     result: list[GradeSalary] = []
     for grade in GRADE_ORDER:
         vals = buckets[grade]
         if not vals:
             continue
+        band_lo, band_hi = centered_band(vals)
         result.append(
             GradeSalary(
                 grade=grade,
                 count=len(vals),
                 mean_rub=round(statistics.mean(vals)),
                 median_rub=round(statistics.median(vals)),
+                band_lo_rub=round(band_lo),
+                band_hi_rub=round(band_hi),
             )
         )
     return result

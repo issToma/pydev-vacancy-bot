@@ -126,28 +126,34 @@ async def search_vacancies(session: AsyncSession, f: VacancyFilters) -> list[Vac
     return [VacancyRow(*r) for r in rows]
 
 
-async def count_dev_vacancies(session: AsyncSession) -> int:
-    """Сколько всего вакансий в dev-срезе (для показателя покрытия зарплатами)."""
-    return (await session.execute(text("SELECT count(*) FROM dev_vacancies"))).scalar() or 0
+async def count_all_vacancies(session: AsyncSession) -> int:
+    """Сколько всего собранных вакансий (для показателя покрытия зарплатами).
+
+    Считаем по vacancies_scraped, а не по dev-срезу: аналитика зарплат показывает
+    и не-разработчиков отдельной группой, значит покрытие меряем от всех вакансий.
+    """
+    return (await session.execute(text("SELECT count(*) FROM vacancies_scraped"))).scalar() or 0
 
 
 async def salary_rows(
     session: AsyncSession,
-) -> list[tuple[str, int | None, int | None, str | None]]:
-    """Все dev-вакансии с указанной зарплатой: (name, salary_min, salary_max, currency).
+) -> list[tuple[str, int | None, int | None, str | None, list[str] | None]]:
+    """Вакансии с зарплатой: (name, salary_min, salary_max, currency, professional_role).
 
-    Берём только строки, где есть хотя бы одна из границ вилки — остальные в
-    аналитику зарплат всё равно не идут.
+    Берём из vacancies_scraped (а не dev-среза), чтобы в аналитику попали и
+    не-разработчики (QA, аналитики, Data/ML/DevOps…) — они уйдут в отдельную группу
+    по professional_role. Только строки, где есть хотя бы одна граница вилки.
     """
     rows = (
         await session.execute(
             text(
-                "SELECT name, salary_min, salary_max, currency FROM dev_vacancies "
+                "SELECT name, salary_min, salary_max, currency, professional_role "
+                "FROM vacancies_scraped "
                 "WHERE salary_min IS NOT NULL OR salary_max IS NOT NULL"
             )
         )
     ).all()
-    return [(r[0], r[1], r[2], r[3]) for r in rows]
+    return [(r[0], r[1], r[2], r[3], r[4]) for r in rows]
 
 
 @dataclass(frozen=True)

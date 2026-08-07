@@ -29,14 +29,19 @@ from core.usage import over_budget
 from services.vacancy.repo import (
     VacancyFilters,
     VacancyRow,
-    count_dev_vacancies,
+    count_all_vacancies,
     format_vacancy_card,
     salary_rows,
     search_vacancies,
     top_technologies,
 )
 from services.vacancy.fx import get_fx_rates
-from services.vacancy.salary_stats import GRADE_NONE, GRADE_OTHER, aggregate_by_grade
+from services.vacancy.salary_stats import (
+    GRADE_NON_DEV,
+    GRADE_NONE,
+    GRADE_OTHER,
+    aggregate_by_grade,
+)
 from services.vacancy.filters_ui import register_filter_dialog
 from services.vacancy.subs import (
     create_subscription,
@@ -171,7 +176,7 @@ class VacancyService:
             rates = await get_fx_rates(infra.redis)
             async with infra.session_factory() as session:
                 rows = await salary_rows(session)
-                total = await count_dev_vacancies(session)
+                total = await count_all_vacancies(session)
             stats = aggregate_by_grade(rows, rates)
             if not stats:
                 await message.answer("Нет вакансий с указанной зарплатой")
@@ -187,6 +192,10 @@ class VacancyService:
                 lines.append(
                     f"средняя <b>{_fmt_rub(s.mean_rub)}</b> · "
                     f"медиана <b>{_fmt_rub(s.median_rub)}</b>"
+                )
+                lines.append(
+                    f"вилка <b>{_fmt_rub(s.band_lo_rub)}</b> – "
+                    f"<b>{_fmt_rub(s.band_hi_rub)}</b> <i>(½ рынка)</i>"
                 )
 
             # служебный подвал — в цитату-блок, разбитый на подписанные мини-секции
@@ -211,6 +220,8 @@ class VacancyService:
                 legend.append(f"{GRADE_OTHER} — тимлид, хед, архитектор, principal")
             if GRADE_NONE in grades:
                 legend.append(f"{GRADE_NONE} — нет junior/middle/senior в названии")
+            if GRADE_NON_DEV in grades:
+                legend.append(f"{GRADE_NON_DEV} — QA, аналитики, Data/ML/DevOps и пр. (по роли)")
             if legend:
                 note += ["", "<b>Обозначения</b>", *legend]
 
