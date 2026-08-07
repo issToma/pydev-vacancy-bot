@@ -206,7 +206,7 @@ class VacancyService:
             # курс показываем для валют, что реально встречаются в данных (не только $/€);
             # рубли и валюты без курса ЦБ не показываем. USD/EUR — вперёд, дальше по алфавиту.
             present = sorted(
-                {(c or "RUR").upper() for *_, c in rows} - {"RUR", "RUB"},
+                {(r[3] or "RUR").upper() for r in rows} - {"RUR", "RUB"},
                 key=lambda c: (c not in ("USD", "EUR"), c),
             )
             fx = [f"{c} {_fmt_rate(rates[c])}" for c in present if c in rates]
