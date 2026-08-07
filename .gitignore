@@ -20,3 +20,6 @@ weights/
 
 # Celery Beat runtime state
 celerybeat-schedule*
+
+# Внутренняя тестовая разработка автооткликов — НЕ коммитим (hh_auth.json, .env, вью, клик-код)
+_autoapply/
