@@ -5,6 +5,7 @@ import json
 import logging
 import random
 import time
+from pathlib import Path
 from urllib.parse import urlencode
 
 from dateutil import parser as dt_parser
@@ -135,20 +136,41 @@ async def _make_context(browser) -> tuple[BrowserContext, Page]:
     return context, page
 
 
+# Бандл-снимок справочника ролей hh (services/vacancy/scraper/professional_roles.json).
+# Нужен как фолбэк: если live-запрос к API упадёт, id всё равно смапятся в названия,
+# а не осядут в БД сырыми числами (иначе ломается фильтр dev_vacancies по ролям).
+_ROLES_FALLBACK = Path(__file__).with_name("professional_roles.json")
+
+
+def _parse_roles(data: dict) -> dict:
+    """id→название из ответа /professional_roles (categories → roles)."""
+    role_map: dict[str, str] = {}
+    for cat in data.get("categories", []):
+        for r in cat.get("roles", []):
+            role_map[str(r["id"])] = r["name"]
+    return role_map
+
+
 async def _load_role_map(context: BrowserContext) -> dict:
-    """Справочник профессиональных ролей id→название (через контекст браузера)."""
+    """Справочник ролей id→название: база — бандл-снимок (гарантирует покрытие при
+    сбое сети), поверх — живой ответ hh (свежесть). Так id всегда резолвится."""
+    role_map: dict[str, str] = {}
+    try:
+        role_map = _parse_roles(json.loads(_ROLES_FALLBACK.read_text(encoding="utf-8")))
+    except Exception as e:
+        logger.warning("Бандл справочника ролей недоступен (%r)", e)
     try:
         resp = await context.request.get(ROLES_URL)
-        data = await resp.json()
-        role_map = {}
-        for cat in data.get("categories", []):
-            for r in cat.get("roles", []):
-                role_map[str(r["id"])] = r["name"]
-        logger.info("Загружен справочник ролей: %s записей", len(role_map))
-        return role_map
+        live = _parse_roles(await resp.json())
+        if live:
+            role_map.update(live)  # свежие данные поверх бандла
     except Exception as e:
-        logger.warning("Не удалось загрузить справочник ролей (%r) — роли будут как id", e)
-        return {}
+        logger.warning(
+            "Live-справочник ролей не загрузился (%r) — использую бандл (%s записей)",
+            e, len(role_map),
+        )
+    logger.info("Справочник ролей: %s записей", len(role_map))
+    return role_map
 
 
 def _parse_list_ids(state: dict) -> tuple[list[tuple[int, str]], int]:
