@@ -2,7 +2,8 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
+from botocore.exceptions import BotoCoreError
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import BufferedInputFile
 
@@ -19,6 +20,32 @@ from services.dewarp.service import build_result_kb
 from services.vacancy.notifications import run_notifier_supervised
 
 logging.basicConfig(level=logging.INFO)
+
+
+async def _startup_call(
+    coro_factory, *, what: str, errors: tuple[type[Exception], ...],
+    attempts: int = 5, base_delay: float = 2.0,
+):
+    """Стартовый сетевой вызов с ретраями и экспоненциальным бэкоффом.
+
+    До start_polling любой внешний запрос (Telegram set_my_commands, MinIO
+    ensure_buckets) при кратковременном сетевом блипе роняет процесс целиком. Long
+    polling обрывы после старта переживает сам — а вот эти до-polling вызовы нет,
+    поэтому оборачиваем их. Ретраим только сетевые ошибки из `errors` (не логические:
+    напр. S3 ClientError — это валидный ответ, его пробрасываем сразу).
+    coro_factory — фабрика (lambda), создающая свежую корутину на каждую попытку."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return await coro_factory()
+        except errors as exc:
+            if attempt == attempts:
+                raise
+            delay = base_delay * 2 ** (attempt - 1)
+            logging.warning(
+                "Сеть недоступна (%s), попытка %d/%d — повтор через %.0fс: %s",
+                what, attempt, attempts, delay, exc,
+            )
+            await asyncio.sleep(delay)
 
 
 def build_dispatcher() -> Dispatcher:
@@ -60,11 +87,14 @@ async def main() -> None:
     dp = build_dispatcher()
 
     # S3-бакеты для Dewarp (idempotent) — чтобы на свежем MinIO загрузка не падала.
-    await s3.ensure_buckets()
+    await _startup_call(s3.ensure_buckets, what="ensure_buckets", errors=(BotoCoreError,))
 
     # Глобальное /-меню по умолчанию — пустое: на главном уровне навигация идёт
     # reply-клавиатурой, а команды раздела навигация выставляет per-chat при входе.
-    await bot.set_my_commands([])
+    await _startup_call(
+        lambda: bot.set_my_commands([]), what="set_my_commands",
+        errors=(TelegramNetworkError,),
+    )
 
     # Прямой RabbitMQ-consumer уведомлений — фоновой задачей внутри бота.
     # deliver решает, как доставить payload: текст (подписки) или фото из S3 (dewarp).
