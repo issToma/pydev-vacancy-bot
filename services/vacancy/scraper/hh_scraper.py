@@ -18,6 +18,25 @@ from services.vacancy.scraper.text_utils import strip_html_tags
 
 logger = logging.getLogger(__name__)
 
+
+def _clear_stale_firefox_lock() -> None:
+    """Убрать висячий lock, оставшийся от нечисто закрытого Firefox.
+
+    Playwright при старте делает stat файла .cache/ms-playwright/firefox-*/firefox/lock.
+    Если предыдущий запуск упал/был убит, там остаётся симлинк lock -> IP:+PID мёртвого
+    процесса. stat идёт по симлинку, цель не существует → ENOENT, и launch падает.
+    Удаляем только висячий симлинк (живой процесс не трогаем)."""
+    cache = Path.home() / ".cache" / "ms-playwright"
+    for lock in cache.glob("firefox-*/firefox/lock"):
+        # is_symlink() без резолва + not exists() = симлинк на мёртвую цель
+        if lock.is_symlink() and not lock.exists():
+            try:
+                lock.unlink()
+                logger.warning("Удалён висячий Firefox lock: %s", lock)
+            except OSError as exc:
+                logger.warning("Не удалось удалить Firefox lock %s: %s", lock, exc)
+
+
 SEARCH_URL = "https://hh.ru/search/vacancy"
 ROLES_URL = "https://api.hh.ru/professional_roles"
 # Во встроенный <template> hh.ru кладёт JSON со всем состоянием страницы
@@ -282,6 +301,7 @@ async def scrape_new_vacancies(existing_ids: set, on_batch=None) -> int:
     collected_count = 0
     buffer: list[dict] = []
 
+    _clear_stale_firefox_lock()
     async with async_playwright() as p:
         browser = await p.firefox.launch(headless=config.HEADLESS)
         context, page = await _make_context(browser)
