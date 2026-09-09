@@ -22,7 +22,10 @@ command -v uv >/dev/null 2>&1 || { echo "!! uv не найден в PATH. Уст
 unset ALL_PROXY all_proxy HTTP_PROXY http_proxy HTTPS_PROXY https_proxy NO_PROXY no_proxy
 
 echo ">> Инфраструктура (docker: postgres/redis/rabbitmq/minio)…"
-sudo docker compose up -d postgres redis rabbitmq minio
+# --wait: ждём healthcheck'и (postgres/rabbitmq), прежде чем стартовать бот/воркер.
+# Иначе они коннектятся к ещё не готовому брокеру → на старте сыпался безобидный,
+# но пугающий ERROR «Connection reset by peer» от notifier и celery beat.
+sudo docker compose up -d --wait postgres redis rabbitmq minio
 
 echo ">> Миграции БД…"
 uv run alembic upgrade head
