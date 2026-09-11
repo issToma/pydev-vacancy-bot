@@ -8,6 +8,8 @@ SEARCH_FILTERS = {
     "employment": "full",              # занятость: полный рабочий день
     "schedule": "fullDay",             # график: полный день
     "search_period": "30",             # за последние 30 дней
+    "order_by": "publication_time",    # сортировка по дате (свежие сверху): при потолке
+                                       # MAX_PAGES*items новые вакансии не теряются в хвосте
     "items_on_page": "100",            # вакансий на странице (20/50/100)
 }
 
