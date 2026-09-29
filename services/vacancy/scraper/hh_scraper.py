@@ -192,19 +192,24 @@ async def _load_role_map(context: BrowserContext) -> dict:
     return role_map
 
 
-def _parse_list_ids(state: dict) -> tuple[list[tuple[int, str]], int]:
-    """Возвращает [(vacancy_id, url), ...] и общее число результатов по фильтру."""
+def _parse_list_ids(state: dict) -> tuple[list[tuple[int, str]], int, dict[int, bool]]:
+    """Возвращает [(vacancy_id, url), ...], общее число результатов по фильтру и карту
+    {vacancy_id: userTestPresent}. Признак теста берём из выдачи: на детальной странице
+    hh его больше не отдаёт (осень 2026)."""
     vsr = state.get("vacancySearchResult") or {}
     vacancies = vsr.get("vacancies") or []
     total = vsr.get("totalResults") or 0
     items: list[tuple[int, str]] = []
+    tests: dict[int, bool] = {}
     for v in vacancies:
         vid = v.get("vacancyId")
         if vid is None:
             continue
+        vid = int(vid)
         url = (v.get("links") or {}).get("desktop") or f"https://hh.ru/vacancy/{vid}"
-        items.append((int(vid), url))
-    return items, total
+        items.append((vid, url))
+        tests[vid] = bool(v.get("userTestPresent"))
+    return items, total, tests
 
 
 def _dedup_listed(items: list[tuple[int, str]]) -> list[tuple[int, str]]:
@@ -235,21 +240,37 @@ def _address_str(addr: dict | None) -> str | None:
     return joined[:256] or None
 
 
+# ISO 639 (как hh отдаёт в languages[].isoCode) → русское название. Фолбэк — код как есть.
+LANGUAGE_NAMES = {
+    "rus": "Русский", "eng": "Английский", "uzb": "Узбекский", "kaz": "Казахский",
+    "ukr": "Украинский", "deu": "Немецкий", "fra": "Французский", "spa": "Испанский",
+    "ita": "Итальянский", "zho": "Китайский", "tur": "Турецкий", "ara": "Арабский",
+    "aze": "Азербайджанский", "hye": "Армянский", "kat": "Грузинский", "bel": "Белорусский",
+    "tgk": "Таджикский", "kir": "Киргизский", "tuk": "Туркменский", "pol": "Польский",
+}
+
+
 def _languages(vv: dict) -> list[str] | None:
+    # Новая схема hh: languages[] = {id, isoCode, degree} (было {name, level:{name}}).
     langs = vv.get("languages")
     if not langs:
         return None
     out = []
     for lang in langs:
-        name = lang.get("name") or ""
-        level = (lang.get("level") or {}).get("name")
-        out.append(f"{name} — {level}" if level else name)
+        iso = (lang.get("isoCode") or "").lower()
+        name = LANGUAGE_NAMES.get(iso, iso.upper() or "?")
+        degree = (lang.get("degree") or "").upper()
+        out.append(f"{name} — {degree}" if degree else name)
     return out or None
 
 
-def parse_detail(state: dict, role_map: dict) -> dict | None:
-    """Извлекает полную строку (схема vacancies_scraped) из стейта детальной страницы."""
-    vv = state.get("vacancyView") or {}
+def parse_detail(state: dict, role_map: dict, has_test: bool = False) -> dict | None:
+    """Извлекает полную строку (схема vacancies_scraped) из стейта детальной страницы.
+
+    С осени 2026 hh вложил данные глубже: vacancyView.vacancyFull.vacancy (раньше —
+    прямо в vacancyView). Признак теста на детальной странице отсутствует — приходит
+    из выдачи параметром has_test."""
+    vv = (((state.get("vacancyView") or {}).get("vacancyFull") or {}).get("vacancy")) or {}
     vid = vv.get("vacancyId")
     if vid is None:
         return None
@@ -259,10 +280,10 @@ def parse_detail(state: dict, role_map: dict) -> dict | None:
     comp = vv.get("compensation") or {}
     description_html = vv.get("description", "") or ""
     description_text = strip_html_tags(description_html)
-    key_skills = ((vv.get("keySkills") or {}).get("keySkill")) or []
+    key_skills = vv.get("keySkills") or []          # теперь плоский список строк
     role_ids = vv.get("professionalRoleIds") or []
     work_formats = vv.get("workFormats") or []
-    pub = vv.get("publicationDate")
+    pub = vv.get("publicationTimeIso")              # было publicationDate
 
     return {
         "id": vid,
@@ -283,7 +304,7 @@ def parse_detail(state: dict, role_map: dict) -> dict | None:
         "employment_format": EMPLOYMENT_FORM_MAP.get(vv.get("employmentForm")),
         "description": description_text or None,
         "description_key_words": extract_technologies(description_text) or None,
-        "has_test": bool(vv.get("userTestId") or vv.get("userTestPresent")),
+        "has_test": bool(has_test),
         "key_skills": list(key_skills) or None,
         "languages": _languages(vv),
         "archived": (vv.get("status") or {}).get("archived"),
@@ -308,18 +329,20 @@ async def scrape_new_vacancies(existing_ids: set, on_batch=None) -> int:
 
         role_map = await _load_role_map(context)
 
-        # 1) Собираем id вакансий со страниц выдачи
+        # 1) Собираем id вакансий со страниц выдачи (+ признак теста из выдачи)
         listed: list[tuple[int, str]] = []
+        test_by_id: dict[int, bool] = {}
         for page_num in range(config.MAX_PAGES):
             state = await _goto_and_get_state(page, build_search_url(page_num))
             if not state:
                 break
-            items, total = _parse_list_ids(state)
+            items, total, tests = _parse_list_ids(state)
             if not items:
                 logger.info("Страница %s пуста — останавливаюсь", page_num + 1)
                 break
             logger.info("Страница %s: %s вакансий (всего по фильтру ~%s)", page_num + 1, len(items), total)
             listed.extend(items)
+            test_by_id.update(tests)
             await _human_delay()
 
         # дедуп за прогон: один id мог прийти на двух страницах (hh тасует выдачу)
@@ -352,7 +375,7 @@ async def scrape_new_vacancies(existing_ids: set, on_batch=None) -> int:
             if not state:
                 bar.write(f"  ! {vid} — пропуск (нет данных)")
                 continue
-            detail = parse_detail(state, role_map)
+            detail = parse_detail(state, role_map, has_test=test_by_id.get(vid, False))
             if detail:
                 collected_count += 1
                 buffer.append(detail)
