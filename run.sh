@@ -30,8 +30,13 @@ sudo docker compose up -d --wait postgres redis rabbitmq minio
 echo ">> Миграции БД…"
 uv run alembic upgrade head
 
-echo ">> Бот + воркер (Ctrl+C — остановить оба)…"
-trap 'kill 0' EXIT                                   # на выходе гасим обе фоновые задачи
+echo ">> Бот + воркер + раздача файлов (Ctrl+C — остановить всё)…"
+trap 'kill 0' EXIT                                   # на выходе гасим все фоновые задачи
 uv run celery -A core.celery_app:celery_app worker -B -l info &
 uv run python -m bot.main &
+# Раздача скачанных файлов: ссылки на то, что не влезает в чат (> 48 МБ).
+# Отдельное приложение, а не api.main: у основного API есть POST /subscriptions
+# без авторизации и Swagger — наружу его выставлять нельзя. Порт обязан совпадать
+# с PUBLIC_BASE_URL в .env, иначе ссылки будут указывать не туда.
+uv run uvicorn api.files:app --host 0.0.0.0 --port 8080 &
 wait

@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     )
 
     telegram_bot_token: str
+    # Кому разрешено пользоваться ботом: "123,456" (свой id покажет @userinfobot).
+    # Пусто = пускаем всех; так можно только локально и только пока бот ничего
+    # не качает на диск — см. AllowlistMiddleware.
+    allowed_user_ids: str = ""
 
     # Подключение к PostgreSQL. Дефолт — локальный compose-postgres (хост-порт 5433).
     # В docker значение переопределяется через env DATABASE_URL (хост = postgres:5432).
@@ -83,9 +87,54 @@ class Settings(BaseSettings):
     match_rate_limit: int = 5              # /match дороже /ask (БД+LLM) → строже
     match_rate_limit_window: int = 3600
 
+    # --- Download (скачивание видео по ссылке через yt-dlp) ---
+    # Готовые файлы остаются на диске машины (в Telegram не отправляются: лимит 50 МБ).
+    # Относительный путь считается от рабочего каталога процесса (корень проекта).
+    download_dir: str = "downloads"
+    # Прокси ТОЛЬКО для yt-dlp (напр. socks5://127.0.0.1:1080). Скрапер hh.ru его не
+    # видит и ходит напрямую — у них противоположные требования к VPN.
+    ytdlp_proxy: str = ""
+    # Браузер, из которого брать cookies (chrome/firefox/...): обход антибота YouTube.
+    ytdlp_cookies_from_browser: str = ""
+    # Готовый файл до этого размера отправляем в чат, что больше — остаётся на
+    # диске. Потолок задан не нами: Bot API разрешает боту отправить максимум 50 МБ.
+    download_inline_max_mb: int = 48
+    # Ссылка на файлы, не влезающие в чат. Пусто = ссылок не выдаём (в чат идёт
+    # только «файл в папке загрузок»). Дома — http://<ip-в-локальной-сети>:8080,
+    # на сервере — https://<домен>; порт должен совпадать с запуском api.files.
+    public_base_url: str = ""
+    download_link_ttl_hours: int = 48       # сколько живёт ссылка
+    # Предохранитель от выкачивания трафика по утёкшей ссылке. Считаются все
+    # запросы, включая Range-куски при перемотке, поэтому порог высокий.
+    download_link_max_hits: int = 1000
+    download_time_limit: int = 7200         # потолок одной загрузки, секунды (2 ч)
+    download_progress_interval: int = 15    # как часто править сообщение с прогрессом
+    download_min_free_gb: int = 5           # ниже этого порога загрузку не начинаем
+    # Потолок размера папки загрузок. Превышен — удаляем самые старые файлы,
+    # пока не влезем. Самый свежий не удаляется никогда (см. _enforce_dir_limit).
+    download_max_dir_gb: int = 80
+
     # Спенд-лимит: суммарный бюджет токенов LLM на пользователя за сутки (in+out).
     # Ограничивает СТОИМОСТЬ (в дополнение к лимиту по числу запросов). 0 — без лимита.
     llm_daily_token_budget: int = 100000
+
+    @property
+    def inline_max_bytes(self) -> int:
+        """Порог отправки файла в чат, байты (сравнивать с размером файла удобнее так)."""
+        return self.download_inline_max_mb * 1024 ** 2
+
+    @property
+    def allowed_ids(self) -> set[int]:
+        """ALLOWED_USER_IDS ("123, 456") → множество id. Пустая строка → пустое.
+
+        Опечатка валится на старте, а не молча: тихо отброшенный id означал бы
+        либо запертого хозяина, либо открытого всем бота — оба случая хуже падения.
+        """
+        raw = [part.strip() for part in self.allowed_user_ids.split(",") if part.strip()]
+        bad = [part for part in raw if not part.lstrip("-").isdigit()]
+        if bad:
+            raise ValueError(f"ALLOWED_USER_IDS: не числа — {bad}")
+        return {int(part) for part in raw}
 
 
 settings = Settings()

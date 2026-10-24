@@ -1,16 +1,23 @@
 import asyncio
+import contextlib
 import logging
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from botocore.exceptions import BotoCoreError
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, FSInputFile
 
 from core import s3
 
 from bot.help import build_help_router
-from bot.middlewares import FlowStateGuardMiddleware, InfraMiddleware, RateLimitMiddleware
+from bot.middlewares import (
+    AllowlistMiddleware,
+    FlowStateGuardMiddleware,
+    InfraMiddleware,
+    RateLimitMiddleware,
+)
 from bot.navigation import build_fallback_router, build_navigation_router
 from bot.registry import SERVICES, validate_registry
 from core.config import settings
@@ -54,6 +61,9 @@ def build_dispatcher() -> Dispatcher:
 
     # FSM-состояние диалогов — в Redis (переживает перезапуск бота)
     dp = Dispatcher(storage=RedisStorage.from_url(infra.settings.redis_url))
+    # allowlist — самым первым: посторонний не должен доходить даже до rate-limit
+    dp.message.middleware(AllowlistMiddleware(infra.settings.allowed_ids))
+    dp.callback_query.middleware(AllowlistMiddleware(infra.settings.allowed_ids))
     # rate-limit раньше всего (отсекаем спам до полезной работы), затем DI infra
     dp.message.middleware(
         RateLimitMiddleware(
@@ -101,7 +111,43 @@ async def main() -> None:
     # Ошибки доставки → DLQ (см. notifications.py).
     async def deliver(payload: dict) -> None:
         user_id = payload["user_id"]
-        if payload.get("photo_key"):
+        if payload.get("edit_message_id"):
+            # ход выполнения (скачивание видео): правим одно сообщение, а не плодим
+            # новые. «Текст не изменился» или удалённое сообщение — не повод
+            # отклонять доставку в DLQ: прогресс не критичен.
+            try:
+                await bot.edit_message_text(
+                    payload["text"][:TELEGRAM_TEXT_LIMIT], chat_id=user_id,
+                    message_id=payload["edit_message_id"],
+                    disable_web_page_preview=True,
+                )
+            except TelegramBadRequest:
+                pass
+        elif payload.get("media_path"):
+            # готовая загрузка, влезающая в лимит Bot API (48 МБ): отдаём файлом,
+            # чтобы смотреть/слушать можно было из любой сети, а не только дома.
+            # FSInputFile читает с диска потоком — файл целиком в память не грузим.
+            path = payload["media_path"]
+            caption = payload.get("caption", "")[:1024]      # лимит подписи Telegram
+            thumb = payload.get("thumb_path")
+            if payload.get("is_audio"):
+                await bot.send_audio(
+                    user_id, FSInputFile(path), caption=caption,
+                    title=payload.get("caption"),
+                )
+            else:
+                await bot.send_video(
+                    user_id, FSInputFile(path), caption=caption,
+                    supports_streaming=True,              # плеер вместо «документа»
+                    width=payload.get("width"), height=payload.get("height"),
+                    duration=payload.get("duration"),
+                    thumbnail=FSInputFile(thumb) if thumb else None,
+                )
+            if thumb:
+                # служебный кадр из /tmp больше не нужен; само видео не трогаем
+                with contextlib.suppress(OSError):
+                    Path(thumb).unlink()
+        elif payload.get("photo_key"):
             data = await s3.get_object(payload["photo_bucket"], payload["photo_key"])
             # по умолчанию — фото (превью в чате) + кнопка получить полное качество файлом
             await bot.send_photo(

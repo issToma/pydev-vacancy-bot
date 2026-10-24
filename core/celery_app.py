@@ -15,24 +15,36 @@ celery_app = Celery(
     backend=settings.celery_result_backend,
     # include — модули с задачами, которые воркер импортирует при старте,
     # чтобы зарегистрировать их в реестре задач.
-    include=["services.vacancy.tasks", "services.dewarp.tasks"],
+    include=[
+        "services.vacancy.tasks", "services.dewarp.tasks", "services.download.tasks",
+    ],
 )
 
 # Базовая конфигурация.
 celery_app.conf.update(
     task_track_started=True,        # статус STARTED (а не только PENDING→SUCCESS)
-    task_time_limit=600,            # жёсткий лимит 10 мин на задачу (защита от зависаний)
+    # жёсткий лимит 10 мин на задачу (защита от зависаний). Долгие задачи
+    # переопределяют его у себя: см. download_task (скачивание видео).
+    task_time_limit=600,
     timezone="UTC",
 )
 
 # Расписание Beat: периодически запускать скрапинг вакансий.
 # Beat — отдельный процесс-планировщик; он лишь КЛАДЁТ задачу в брокер по
 # расписанию, а исполняет её обычный воркер. Интервал задаётся в секундах.
+
 celery_app.conf.beat_schedule = {
     "scrape-vacancies-periodic": {
         "task": "services.vacancy.tasks.scrape_vacancies",
         "schedule": 5 * 60,                 # каждые 5 минут
         # если задача провисела в очереди дольше интервала — выбросить (не копить backlog)
         "options": {"expires": 5 * 60},
+    },
+    # Папку загрузок подрезает и сама задача скачивания; это страховка на случай
+    # файлов, попавших туда иначе (положили руками, упавшая загрузка).
+    "cleanup-downloads-hourly": {
+        "task": "services.download.tasks.cleanup_downloads",
+        "schedule": 60 * 60,
+        "options": {"expires": 60 * 60},
     },
 }

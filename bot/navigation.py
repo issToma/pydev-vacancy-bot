@@ -20,6 +20,7 @@ SECTION_LABELS = {
     "vacancy": "📋 Вакансии",
     "dewarp": "🖼 Dewarp",
     "ask": "🤖 Ask",
+    "download": "⬇️ Скачать",
 }
 
 

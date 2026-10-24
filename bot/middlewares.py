@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -9,6 +10,8 @@ from redis.asyncio import Redis
 
 from core.contracts import Infra
 from core.ratelimit import check_rate_limit
+
+logger = logging.getLogger(__name__)
 
 
 class InfraMiddleware(BaseMiddleware):
@@ -28,6 +31,37 @@ class InfraMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         data["infra"] = self.infra
+        return await handler(event, data)
+
+
+class AllowlistMiddleware(BaseMiddleware):
+    """Пускает в бота только указанных пользователей (ALLOWED_USER_IDS).
+
+    Пустой список = пускаем всех (режим разработки). Как только бот качает файлы
+    на диск машины, «пускаем всех» означает, что любой нашедший бота расходует
+    твой диск, трафик и процессор — поэтому на реальном запуске список нужен.
+
+    Стоит первым в цепочке: отбиваем до rate-limit и до любой полезной работы,
+    чтобы незнакомец не тратил даже обращение к Redis.
+    """
+
+    def __init__(self, allowed_ids: set[int]) -> None:
+        self.allowed_ids = allowed_ids
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        if not self.allowed_ids:
+            return await handler(event, data)
+        user = data.get("event_from_user")
+        if user is not None and user.id not in self.allowed_ids:
+            logger.warning("Отклонён доступ: user_id=%s (@%s)", user.id, user.username)
+            if isinstance(event, Message):
+                await event.answer("Доступ к этому боту ограничен.")
+            return None
         return await handler(event, data)
 
 
