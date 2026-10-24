@@ -21,6 +21,10 @@ weights/
 # Celery Beat runtime state
 celerybeat-schedule*
 
+# Кеши инструментов
+.pytest_cache/
+.ruff_cache/
+
 # Внутренняя тестовая разработка автооткликов — НЕ коммитим (hh_auth.json, .env, вью, клик-код)
 _autoapply/
 

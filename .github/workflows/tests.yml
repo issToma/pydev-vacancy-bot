@@ -1,0 +1,28 @@
+# Оффлайн-набор тестов: живых Postgres/Redis/RabbitMQ им не нужно, поэтому
+# сервис-контейнеры в workflow не поднимаем. Полный uv sync всё равно обязателен —
+# tests/test_registry.py импортирует реестр сервисов, а через него весь код.
+name: tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Поставить uv (+ кеш зависимостей)
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --frozen: ставим ровно то, что в uv.lock, и падаем, если он разошёлся
+      # с pyproject.toml. Версию Python uv берёт из .python-version.
+      - name: Зависимости
+        run: uv sync --frozen
+
+      - name: Тесты
+        run: uv run pytest -q

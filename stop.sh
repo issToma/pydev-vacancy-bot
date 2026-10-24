@@ -7,9 +7,10 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-echo ">> Останавливаю бот и воркер…"
+echo ">> Останавливаю бот, воркер и раздачу файлов…"
 pkill -f "python -m bot.main" 2>/dev/null && echo "   бот остановлен" || echo "   бот не запущен"
 pkill -f "celery -A core.celery_app" 2>/dev/null && echo "   воркер остановлен" || echo "   воркер не запущен"
+pkill -f "uvicorn api.files:app" 2>/dev/null && echo "   раздача остановлена" || echo "   раздача не запущена"
 
 echo ">> Останавливаю инфру (docker)…"
 sudo docker compose stop postgres redis rabbitmq minio

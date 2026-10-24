@@ -1,5 +1,8 @@
 # vacancy_bot
 
+<!-- Бейдж заработает после привязки к GitHub: замени OWNER на свой логин. -->
+[![tests](https://github.com/OWNER/vacancy_bot/actions/workflows/tests.yml/badge.svg)](https://github.com/OWNER/vacancy_bot/actions/workflows/tests.yml)
+
 Telegram-бот-гейтвей (gateway) к набору бэкенд-сервисов. Учебный pet-проект для практики
 современного Python-стека, где каждая технология взята под конкретную задачу.
 
@@ -13,11 +16,12 @@ Telegram-бот-гейтвей (gateway) к набору бэкенд-серви
 | **Vacancy Radar** | `/vacancies`, `/filter`, `/stack`, `/subscribe`, `/subscriptions`, `/match` | Поиск/аналитика вакансий (скрапинг hh.ru), подписки с уведомлениями, топ технологий, подбор по резюме через LLM |
 | **Dewarp** | `/dewarp` | Выпрямление фото документов (OpenCV/YOLO) → результат из S3/MinIO |
 | **Ask** | `/ask`, `/usage` | Q&A по программированию через LLM со **streaming**-ответом и памятью диалога; `/usage` — свой расход токенов |
+| **Download** | `/dl`, `/downloads` | Скачивание видео/аудио по ссылке (yt-dlp): выбор качества, прогресс в одном сообщении, автоочистка папки; мелкие файлы — в чат, крупные — ссылкой с токеном |
 
 ## Навигация
 
 Вместо «всё вперемешку» в одном чате — **разделы**: `/start` или `/menu` открывают главное
-меню (reply-клавиатура), выбор раздела (Вакансии / Dewarp / Ask) показывает **кнопки-действия
+меню (reply-клавиатура), выбор раздела (Вакансии / Dewarp / Ask / Скачать) показывает **кнопки-действия
 этого раздела понятными словами** («🔎 Поиск», «📊 Топ стек», «🤖 Задать вопрос» …). Кнопки,
 требующие ввода (поиск, вопрос, резюме), по нажатию спрашивают текст. `/`-меню при этом пустое —
 навигация идёт кнопками; сами команды (`/vacancies`, `/ask` …) продолжают работать по вводу.
@@ -32,9 +36,10 @@ Telegram-бот-гейтвей (gateway) к набору бэкенд-серви
 Telegram → aiogram-бот ──HTTP──► FastAPI (REST-слой сервисов)
    ▲            │
    │            ├─ тяжёлое → RabbitMQ → Celery-воркеры:
-   │            │     ├─ scrape (Playwright) → PostgreSQL   (по расписанию, Beat)
-   │            │     ├─ dewarp (OpenCV/YOLO) → S3/MinIO
-   │            │     └─ match  (LLM-ранжирование) → результат
+   │            │     ├─ scrape   (Playwright) → PostgreSQL   (по расписанию, Beat)
+   │            │     ├─ dewarp   (OpenCV/YOLO) → S3/MinIO
+   │            │     ├─ match    (LLM-ранжирование) → результат
+   │            │     └─ download (yt-dlp) → диск ──► api.files: /d/{token}
    │            │
    │            └─ /ask: прямой async + streaming к LLM (НЕ Celery)
    │
@@ -51,7 +56,11 @@ Telegram → aiogram-бот ──HTTP──► FastAPI (REST-слой серв�
 
 Python 3.13 · **uv** · aiogram 3 · FastAPI · SQLAlchemy 2.0 (async, asyncpg) + Alembic ·
 Celery + Beat · RabbitMQ (aio-pika) · Redis · MinIO/S3 (aioboto3) · Playwright · OpenCV/YOLO ·
-LLM через OpenAI-совместимый API (Google Gemini по умолчанию, провайдер-агностично).
+yt-dlp + ffmpeg · LLM через OpenAI-совместимый API (Google Gemini по умолчанию,
+провайдер-агностично).
+
+Внешние бинарники: **ffmpeg/ffprobe** (склейка дорожек, обложка и метаданные видео) —
+`apt install ffmpeg`. Без них работает всё, кроме раздела «Скачать».
 
 ## Запуск (локальная разработка)
 
@@ -60,8 +69,8 @@ LLM через OpenAI-совместимый API (Google Gemini по умолч�
 контейнеры помечены `restart: unless-stopped` — после перезагрузки поднимаются сами.
 
 **Старт/стоп одной командой:**
-- `./run.sh` — поднять инфру (docker), прогнать миграции, запустить бот + воркер (логи в этом
-  терминале; Ctrl+C останавливает бот и воркер).
+- `./run.sh` — поднять инфру (docker), прогнать миграции, запустить бот + воркер + раздачу
+  скачанных файлов на `:8080` (логи в этом терминале; Ctrl+C останавливает всё трое).
 - `./stop.sh` — остановить бот, воркер и инфра-контейнеры (остаются выключенными до `./run.sh`).
 
 Скрипты дёргают docker через `sudo` (спросит пароль — это норм). Перед первым запуском один раз
@@ -112,6 +121,26 @@ kill $(ss -ltnp 2>/dev/null | grep :8000 | grep -oP 'pid=\K[0-9]+')
 Все настройки — через переменные окружения (`pydantic-settings`), см. **`.env.example`** с описанием каждой.
 Обязательны только `TELEGRAM_BOT_TOKEN` и `LLM_API_KEY`; у остального — рабочие дефолты под локальный compose.
 
+## Доступ и безопасность
+
+Дефолты в репозитории рассчитаны на **локальную разработку на одной машине**. Прежде чем
+поднимать это где-то ещё, нужно сделать три вещи — иначе наружу смотрит слишком многое:
+
+1. **`ALLOWED_USER_IDS`** — список Telegram-id, которым разрешён бот (свой покажет
+   `@userinfobot`). Пустое значение пускает всех, а бот умеет занимать диск и трафик:
+   ссылку на скачивание присылает пользователь. `AllowlistMiddleware` стоит первым в
+   цепочке, чтобы посторонний не доходил даже до rate-limit.
+2. **Порты инфраструктуры.** `docker-compose.yml` публикует Postgres, Redis, RabbitMQ и
+   MinIO на всех интерфейсах с паролями-заглушками (`vacancy:vacancy`, у Redis пароля нет
+   вовсе). Для машины в общей сети добавь префикс `127.0.0.1:` к портам и смени пароли.
+   Учти: публикация портов docker'ом пишет правила в `nat/DOCKER` мимо `INPUT`, поэтому
+   ufw такие порты **не закрывает**.
+3. **Раздача файлов** (`api.files`, порт 8080) — отдельное приложение, а не ручка в
+   `api.main`: у основного API есть Swagger и `POST /subscriptions` без авторизации.
+   Ссылки одноразово-токенные (256 бит, TTL и лимит обращений в настройках), путь берётся
+   из БД и проверяется на вложенность в папку загрузок, любая неудача — одинаковый 404.
+   Но HTTPS тут нет, так что на публичный адрес её ставить только за реверс-прокси.
+
 ## Миграции
 
 ```bash
@@ -131,11 +160,13 @@ rate-limit (на фейк-Redis), хелперы `/match`, эндпоинт `GET
 ## Структура
 
 ```
-bot/        aiogram: main (polling + notifier), registry, middlewares, help
-api/         FastAPI: /health + api_router сервисов
+bot/         aiogram: main (polling + notifier), registry, middlewares, navigation, help
+api/         FastAPI: main (/health + api_router сервисов), files (раздача по токену)
 core/        config, contracts (Infra/ServiceModule), db, redis, s3, celery, llm, tg_html, models, ratelimit
-services/    vacancy/ (скрапер, поиск, подписки, match), dewarp/ (алгоритм+задача), ask/
+services/    vacancy/ (скрапер, поиск, подписки, match), dewarp/ (алгоритм+задача),
+             ask/, download/ (formats, service, tasks)
 migrations/  Alembic
+tests/       оффлайн-набор (pytest)
 docs/        journal.md — журнал решений и «собесные» вопросы
 ```
 
@@ -148,3 +179,10 @@ docs/        journal.md — журнал решений и «собесные» 
 
 Kafka, ClickHouse, Elasticsearch, Prometheus/Grafana, Kubernetes, RAG/pgvector — на текущих
 объёмах и одной ноде не оправданы. Умение объяснить, *почему не взято*, — часть ценности проекта.
+
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE).
+
+Скрапинг hh.ru и скачивание видео используйте в рамках правил соответствующих сервисов:
+ответственность за применение лежит на пользователе.

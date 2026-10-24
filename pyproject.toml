@@ -1,8 +1,10 @@
 [project]
 name = "vacancy-bot"
 version = "0.1.0"
-description = "Add your description here"
+description = "Telegram-бот-гейтвей к бэкенд-сервисам: поиск вакансий со hh.ru, выпрямление фото документов, Q&A с LLM, скачивание видео по ссылке"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = [
     "aio-pika>=9.6.2",
