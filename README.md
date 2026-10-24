@@ -167,13 +167,7 @@ services/    vacancy/ (скрапер, поиск, подписки, match), dew
              ask/, download/ (formats, service, tasks)
 migrations/  Alembic
 tests/       оффлайн-набор (pytest)
-docs/        journal.md — журнал решений и «собесные» вопросы
 ```
-
-## Документы
-
-- **`vacancy_bot_spec.md`** — полное ТЗ и обоснование стека.
-- **`docs/journal.md`** — журнал архитектурных решений по шагам.
 
 ## Вне MVP (осознанно)
 
