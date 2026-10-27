@@ -55,6 +55,101 @@ async def _startup_call(
             await asyncio.sleep(delay)
 
 
+# Telegram показывает в плеере только MP4. mkv/webm — а их отдаёт yt-dlp, когда
+# склеивает VP9/AV1, — sendVideo не принимает, и файл терялся в DLQ.
+PLAYABLE_VIDEO_SUFFIXES = {".mp4", ".mov"}
+MEDIA_SEND_ATTEMPTS = 3
+# Потолок у файла в чат — 48 МБ, на медленном аплинке дефолтных 60с не хватает.
+MEDIA_SEND_TIMEOUT = 300
+
+
+async def _report_send_failure(bot: Bot, user_id: int, path: Path, exc: Exception) -> None:
+    """Сообщить, что файл скачан, но в чат не уехал.
+
+    Молчать нельзя: «✅ Готово» пользователь уже получил и решит, что всё хорошо.
+    """
+    logging.error("Не удалось отправить %s в чат: %s", path.name, exc)
+    await bot.send_message(
+        user_id,
+        f"⚠️ Файл скачан, но отправить его в чат не получилось\n"
+        f"{str(exc)[:200]}\n"
+        f"Он лежит в папке загрузок: {path.name}",
+        disable_web_page_preview=True,
+    )
+
+
+async def _send_media(bot: Bot, payload: dict) -> None:
+    """Отправить готовый файл: аудио, видео или документ — с запасными вариантами.
+
+    Три уровня отказа. Сетевой блип — повтор с бэкоффом: файл уже на диске, терять
+    его из-за разрыва незачем. Telegram не принял как видео — досылаем документом
+    (без плеера, зато доходит). Не вышло ни так ни так — пишем об этом текстом.
+    """
+    user_id = payload["user_id"]
+    path = Path(payload["media_path"])
+    caption = payload.get("caption", "")[:1024]      # лимит подписи Telegram
+    thumb = payload.get("thumb_path")
+    if thumb and not Path(thumb).exists():
+        # повторная доставка (например, вручную из DLQ): временный кадр уже убран
+        # первой попыткой, и FSInputFile упал бы на открытии несуществующего файла
+        thumb = None
+    is_audio = bool(payload.get("is_audio"))
+    as_document = not is_audio and path.suffix.lower() not in PLAYABLE_VIDEO_SUFFIXES
+
+    async def send() -> None:
+        # FSInputFile читает с диска потоком — файл целиком в память не грузим.
+        if is_audio:
+            await bot.send_audio(
+                user_id, FSInputFile(path), caption=caption,
+                title=payload.get("caption"), request_timeout=MEDIA_SEND_TIMEOUT,
+            )
+        elif as_document:
+            await bot.send_document(
+                user_id, FSInputFile(path), caption=caption,
+                thumbnail=FSInputFile(thumb) if thumb else None,
+                request_timeout=MEDIA_SEND_TIMEOUT,
+            )
+        else:
+            await bot.send_video(
+                user_id, FSInputFile(path), caption=caption,
+                supports_streaming=True,              # плеер вместо «документа»
+                width=payload.get("width"), height=payload.get("height"),
+                duration=payload.get("duration"),
+                thumbnail=FSInputFile(thumb) if thumb else None,
+                request_timeout=MEDIA_SEND_TIMEOUT,
+            )
+
+    try:
+        for attempt in range(1, MEDIA_SEND_ATTEMPTS + 1):
+            try:
+                await send()
+                return
+            except TelegramNetworkError as exc:
+                if attempt == MEDIA_SEND_ATTEMPTS:
+                    await _report_send_failure(bot, user_id, path, exc)
+                    return
+                delay = 2.0 * 2 ** (attempt - 1)
+                logging.warning(
+                    "Отправка %s не удалась (попытка %d/%d), повтор через %.0fс: %s",
+                    path.name, attempt, MEDIA_SEND_ATTEMPTS, delay, exc,
+                )
+                await asyncio.sleep(delay)
+            except TelegramBadRequest as exc:
+                if as_document:          # документом уже пробовали — дальше некуда
+                    await _report_send_failure(bot, user_id, path, exc)
+                    return
+                logging.warning(
+                    "Telegram не принял %s как видео (%s) — отправляю документом",
+                    path.name, exc,
+                )
+                as_document = True
+    finally:
+        if thumb:
+            # служебный кадр из /tmp больше не нужен; само видео не трогаем
+            with contextlib.suppress(OSError):
+                Path(thumb).unlink()
+
+
 def build_dispatcher() -> Dispatcher:
     validate_registry(SERVICES)          # инвариант: уникальные name/команды
     infra = build_infra()
@@ -125,28 +220,8 @@ async def main() -> None:
                 pass
         elif payload.get("media_path"):
             # готовая загрузка, влезающая в лимит Bot API (48 МБ): отдаём файлом,
-            # чтобы смотреть/слушать можно было из любой сети, а не только дома.
-            # FSInputFile читает с диска потоком — файл целиком в память не грузим.
-            path = payload["media_path"]
-            caption = payload.get("caption", "")[:1024]      # лимит подписи Telegram
-            thumb = payload.get("thumb_path")
-            if payload.get("is_audio"):
-                await bot.send_audio(
-                    user_id, FSInputFile(path), caption=caption,
-                    title=payload.get("caption"),
-                )
-            else:
-                await bot.send_video(
-                    user_id, FSInputFile(path), caption=caption,
-                    supports_streaming=True,              # плеер вместо «документа»
-                    width=payload.get("width"), height=payload.get("height"),
-                    duration=payload.get("duration"),
-                    thumbnail=FSInputFile(thumb) if thumb else None,
-                )
-            if thumb:
-                # служебный кадр из /tmp больше не нужен; само видео не трогаем
-                with contextlib.suppress(OSError):
-                    Path(thumb).unlink()
+            # чтобы смотреть/слушать можно было из любой сети, а не только дома
+            await _send_media(bot, payload)
         elif payload.get("photo_key"):
             data = await s3.get_object(payload["photo_bucket"], payload["photo_key"])
             # по умолчанию — фото (превью в чате) + кнопка получить полное качество файлом

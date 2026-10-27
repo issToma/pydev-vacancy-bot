@@ -23,9 +23,9 @@ from core.config import settings
 from core.models import Job
 from services.download.formats import (
     AUDIO,
-    FORMAT_SORT,
     QUALITIES,
     build_format,
+    build_format_sort,
     download_dir,
     human_size,
 )
@@ -48,6 +48,14 @@ PARTIAL_SUFFIXES = {".part", ".ytdl"}
 # Файл моложе этого возраста считаем «в работе» и не удаляем: промежуточные
 # дорожки DASH (.f137.mp4) выглядят как обычные файлы, но нужны для склейки.
 FRESH_SECONDS = 3600
+
+
+class PlaylistURL(Exception):
+    """Ссылка ведёт на плейлист, канал или подборку, а не на один ролик."""
+
+    def __init__(self, title: str | None = None) -> None:
+        self.title = title
+        super().__init__(title or "плейлист")
 
 
 def _lock_key(url: str, quality: str) -> str:
@@ -121,7 +129,7 @@ def _ydl_opts(quality: str, hook) -> dict:
     """Опции yt-dlp. Пользовательский выбор — только качество; остальное из настроек."""
     opts: dict = {
         "format": build_format(quality),
-        "format_sort": FORMAT_SORT,      # при равном разрешении — H.264 + AAC
+        "format_sort": build_format_sort(quality),   # им и выбирается разрешение
         "outtmpl": str(download_dir() / "%(title).120B [%(id)s].%(ext)s"),
         "noplaylist": True,          # ссылка на ролик внутри плейлиста = один ролик
         "concurrent_fragment_downloads": 4,
@@ -162,7 +170,19 @@ def _sync_download(opts: dict, url: str) -> dict:
     import yt_dlp
 
     with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=True)
+        # Сначала только метаданные. noplaylist отсекает лишь «ролик внутри
+        # плейлиста»; ссылка на сам плейлист, канал или подборку пользователя
+        # скачала бы всё подряд — пока не упрёмся в лимит времени или в размер
+        # папки. process=False не раскрывает элементы (они приходят ленивым
+        # генератором), поэтому проверка не стоит лишних запросов.
+        info = ydl.extract_info(url, download=False, process=False)
+        if not info:
+            raise RuntimeError("yt-dlp не вернул данные о ссылке")
+        if info.get("_type") == "playlist":
+            raise PlaylistURL(info.get("title"))
+        # ровно то, что extract_info(download=True) делает дальше сам, —
+        # повторно ходить в сеть за уже полученными метаданными незачем
+        return ydl.process_ie_result(info, download=True)
 
 
 def _stage(d: dict) -> str:
@@ -181,6 +201,26 @@ def _stage(d: dict) -> str:
     if vcodec == "none" and acodec != "none":
         return "звук"
     return ""
+
+
+def _done_label(quality: str, probe: dict) -> str:
+    """Подпись готового файла — по настоящему разрешению, а не по нажатой кнопке.
+
+    Кнопки качества одинаковы для любой ссылки, но выбор работает только там, где
+    площадка отдаёт несколько потоков (YouTube, Vimeo). Instagram, TikTok, VK дают
+    один готовый файл, и build_format возвращает его на любую кнопку — подписывать
+    такой результат «480p» было бы враньём. Размеры берём из ffprobe, то есть из
+    самого файла; если ffprobe недоступен, честнее оставить ярлык кнопки.
+
+    Качество считаем по короткой стороне: вертикальный reel 1080×1920 — это
+    привычные «1080p», а не «1920p».
+    """
+    if quality == AUDIO:
+        return QUALITIES[AUDIO]
+    side = min(filter(None, (probe.get("width"), probe.get("height"))), default=0)
+    if not side:
+        return QUALITIES.get(quality, quality)
+    return "4K" if side >= 2160 else f"{side}p"
 
 
 async def _probe_video(path: Path) -> dict:
@@ -360,13 +400,18 @@ async def _run_download(
 
         cached = await _find_done(session_factory, url, quality)
         if cached is not None:
-            cached_title = (cached.params or {}).get("title") or Path(cached.result_ref).stem
+            cached_path = Path(cached.result_ref)
+            cached_title = (cached.params or {}).get("title") or cached_path.stem
+            cached_probe = {} if quality == AUDIO else await _probe_video(cached_path)
             await _update_job(
                 session_factory, jid, status="done", result_ref=cached.result_ref,
                 title=cached_title,
             )
             await _notify(
-                user_id, f"✅ Уже скачано ранее · {label}\n{cached_title}", message_id,
+                user_id,
+                f"✅ Уже скачано ранее · {_done_label(quality, cached_probe)}"
+                f"\n{cached_title}",
+                message_id,
             )
             return "cached"
 
@@ -427,6 +472,9 @@ async def _run_download(
 
         title = info.get("title") or path.stem
         size = path.stat().st_size
+        # один ffprobe на файл: отсюда и подпись с настоящим разрешением,
+        # и метаданные для отправки в чат ниже
+        probe = {} if quality == AUDIO else await _probe_video(path)
         await _update_job(
             session_factory, jid, status="done", result_ref=str(path), title=title,
         )
@@ -434,7 +482,7 @@ async def _run_download(
         # в чат — человеческое название. Имя файла на диске отличается: там ещё
         # id ролика и замены запрещённых символов — это нужно файловой системе,
         # а не пользователю. Полный путь лежит в Job.result_ref.
-        done = f"✅ Готово · {label} · {human_size(size)}\n{title}"
+        done = f"✅ Готово · {_done_label(quality, probe)} · {human_size(size)}\n{title}"
         inline_limit = settings.inline_max_bytes
 
         # папка только что выросла — сразу подрезаем её под лимит. Сейчас
@@ -454,13 +502,23 @@ async def _run_download(
         else:
             # без width/height/duration Telegram покажет документ вместо плеера,
             # без обложки — чёрный прямоугольник
-            media.update(await _probe_video(path))
+            media.update(probe)
             thumb = await _make_thumb(path, media.get("duration"))
             if thumb is not None:
                 media["thumb_path"] = str(thumb)
         await _publish(media)
         return "done"
 
+    except PlaylistURL as exc:
+        await _update_job(session_factory, jid, status="failed", error="ссылка на плейлист")
+        where = f"\n«{exc.title}»" if exc.title else ""
+        await _notify(
+            user_id,
+            f"❌ Это плейлист или канал, а не один ролик{where}\n"
+            f"Пришли ссылку на конкретное видео",
+            message_id,
+        )
+        return "playlist"
     except SoftTimeLimitExceeded:
         await _update_job(session_factory, jid, status="failed", error="превышен лимит времени")
         await _notify(
