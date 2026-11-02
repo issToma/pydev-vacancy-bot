@@ -13,6 +13,6 @@ pkill -f "celery -A core.celery_app" 2>/dev/null && echo "   воркер ост
 pkill -f "uvicorn api.files:app" 2>/dev/null && echo "   раздача остановлена" || echo "   раздача не запущена"
 
 echo ">> Останавливаю инфру (docker)…"
-sudo docker compose stop postgres redis rabbitmq minio
+sudo docker compose stop postgres redis rabbitmq
 
 echo ">> Готово — всё остановлено."

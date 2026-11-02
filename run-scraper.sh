@@ -24,9 +24,9 @@ command -v uv >/dev/null 2>&1 || { echo "!! uv не найден в PATH. Уст
 # httpx (OpenAI-клиент для /match) не умеет socks и падает на импорте.
 unset ALL_PROXY all_proxy HTTP_PROXY http_proxy HTTPS_PROXY https_proxy NO_PROXY no_proxy
 
-echo ">> Инфраструктура (docker: postgres/redis/rabbitmq/minio)…"
+echo ">> Инфраструктура (docker: postgres/redis/rabbitmq)…"
 # --wait: ждём healthcheck'и (postgres/rabbitmq), прежде чем стартовать воркер.
-sudo docker compose up -d --wait postgres redis rabbitmq minio
+sudo docker compose up -d --wait postgres redis rabbitmq
 
 echo ">> Миграции БД…"
 uv run alembic upgrade head

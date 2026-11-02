@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Запуск всего проекта одной командой: инфраструктура (docker) + миграции + бот + воркер.
 # Логи бота и воркера идут в этот же терминал. Ctrl+C останавливает бот и воркер;
-# инфра-контейнеры (postgres/redis/rabbitmq/minio) продолжают жить.
+# инфра-контейнеры (postgres/redis/rabbitmq) продолжают жить.
 #
 # Использование:  ./run.sh
 set -uo pipefail
@@ -21,11 +21,11 @@ command -v uv >/dev/null 2>&1 || { echo "!! uv не найден в PATH. Уст
 # (LLM пойдёт к Gemini напрямую — как в рабочем ручном сценарии.)
 unset ALL_PROXY all_proxy HTTP_PROXY http_proxy HTTPS_PROXY https_proxy NO_PROXY no_proxy
 
-echo ">> Инфраструктура (docker: postgres/redis/rabbitmq/minio)…"
+echo ">> Инфраструктура (docker: postgres/redis/rabbitmq)…"
 # --wait: ждём healthcheck'и (postgres/rabbitmq), прежде чем стартовать бот/воркер.
 # Иначе они коннектятся к ещё не готовому брокеру → на старте сыпался безобидный,
 # но пугающий ERROR «Connection reset by peer» от notifier и celery beat.
-sudo docker compose up -d --wait postgres redis rabbitmq minio
+sudo docker compose up -d --wait postgres redis rabbitmq
 
 echo ">> Миграции БД…"
 uv run alembic upgrade head
