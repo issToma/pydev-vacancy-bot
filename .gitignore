@@ -15,9 +15,6 @@ wheels/
 # IDE
 .idea/
 
-# ML weights (большие, не в git)
-weights/
-
 # Celery Beat runtime state
 celerybeat-schedule*
 
