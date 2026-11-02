@@ -25,7 +25,6 @@ class Infra(Protocol):
     settings: Settings
     session_factory: async_sessionmaker
     redis: Redis
-    s3: object          # модуль core.s3 (put_object/get_object/ensure_buckets)
     celery: object      # Celery-приложение (send_task для постановки задач)
     llm: AsyncOpenAI    # OpenAI-совместимый LLM-клиент (для /ask со streaming)
 

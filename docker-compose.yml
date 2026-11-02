@@ -6,7 +6,6 @@ x-app-env: &app-env
   CELERY_RESULT_BACKEND: redis://redis:6379/0
   REDIS_URL: redis://redis:6379/1
   RABBITMQ_URL: amqp://vacancy:vacancy@rabbitmq:5672/
-  S3_ENDPOINT_URL: http://minio:9000
 
 services:
   # ── Инфраструктура ─────────────────────────────────────────────
@@ -53,19 +52,6 @@ services:
       timeout: 5s
       retries: 5
 
-  minio:
-    image: minio/minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: vacancy
-      MINIO_ROOT_PASSWORD: vacancy123   # MinIO требует пароль >= 8 символов
-    ports:
-      - "9000:9000"          # S3 API
-      - "9001:9001"          # web-консоль: http://localhost:9001
-    volumes:
-      - miniodata:/data
-
   # ── Одноразовая миграция БД (перед стартом приложения) ────────────
   migrate:
     build: .
@@ -105,10 +91,9 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
-      minio: {condition: service_started}
       migrate: {condition: service_completed_successfully}
 
-  # Celery-воркер + встроенный Beat (scrape по расписанию, dewarp, match)
+  # Celery-воркер + встроенный Beat (scrape по расписанию, скачивание, match)
   worker:
     build: .
     command: uv run celery -A core.celery_app:celery_app worker -B -l info
@@ -116,16 +101,12 @@ services:
     environment:
       <<: *app-env
     shm_size: "1gb"          # Playwright/Firefox стабильнее с большим /dev/shm
-    volumes:
-      - ./weights:/app/weights   # веса YOLO для dewarp (в git не коммитятся)
     restart: unless-stopped
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
-      minio: {condition: service_started}
       migrate: {condition: service_completed_successfully}
 
 volumes:
   pgdata:
-  miniodata:

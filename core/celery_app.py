@@ -16,7 +16,7 @@ celery_app = Celery(
     # include — модули с задачами, которые воркер импортирует при старте,
     # чтобы зарегистрировать их в реестре задач.
     include=[
-        "services.vacancy.tasks", "services.dewarp.tasks", "services.download.tasks",
+        "services.vacancy.tasks", "services.download.tasks",
     ],
 )
 

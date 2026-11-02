@@ -46,16 +46,6 @@ class Settings(BaseSettings):
     rate_limit_messages: int = 20
     rate_limit_window: int = 60
 
-    # MinIO / S3 (объектное хранилище для Dewarp). В docker endpoint = http://minio:9000.
-    s3_endpoint_url: str = "http://localhost:9000"
-    s3_access_key: str = "vacancy"
-    s3_secret_key: str = "vacancy123"
-    s3_bucket_input: str = "dewarp-input"
-    s3_bucket_output: str = "dewarp-output"
-
-    # Путь к весам YOLO для деварпинга (в git не коммитится, см. weights/).
-    dewarp_weights_path: str = "weights/best_26_1024_150_x_full_fix.pt"
-
     # --- Ask (Q&A с LLM) ---
     # Провайдер-агностично: любой OpenAI-совместимый endpoint. По умолчанию —
     # Google Gemini (бесплатный tier). Ключ — только из env/.env; пустой = /ask

@@ -14,14 +14,13 @@ Telegram-бот-гейтвей (gateway) к набору бэкенд-серви
 | Сервис | Команды | Что делает |
 |---|---|---|
 | **Vacancy Radar** | `/vacancies`, `/filter`, `/stack`, `/subscribe`, `/subscriptions`, `/match` | Поиск/аналитика вакансий (скрапинг hh.ru), подписки с уведомлениями, топ технологий, подбор по резюме через LLM |
-| **Dewarp** | `/dewarp` | Выпрямление фото документов (OpenCV/YOLO) → результат из S3/MinIO |
 | **Ask** | `/ask`, `/usage` | Q&A по программированию через LLM со **streaming**-ответом и памятью диалога; `/usage` — свой расход токенов |
 | **Download** | `/dl`, `/downloads` | Скачивание видео/аудио по ссылке (yt-dlp): выбор качества, прогресс в одном сообщении, автоочистка папки; мелкие файлы — в чат, крупные — ссылкой с токеном |
 
 ## Навигация
 
 Вместо «всё вперемешку» в одном чате — **разделы**: `/start` или `/menu` открывают главное
-меню (reply-клавиатура), выбор раздела (Вакансии / Dewarp / Ask / Скачать) показывает **кнопки-действия
+меню (reply-клавиатура), выбор раздела (Вакансии / Ask / Скачать) показывает **кнопки-действия
 этого раздела понятными словами** («🔎 Поиск», «📊 Топ стек», «🤖 Задать вопрос» …). Кнопки,
 требующие ввода (поиск, вопрос, резюме), по нажатию спрашивают текст. `/`-меню при этом пустое —
 навигация идёт кнопками; сами команды (`/vacancies`, `/ask` …) продолжают работать по вводу.
@@ -37,7 +36,6 @@ Telegram → aiogram-бот ──HTTP──► FastAPI (REST-слой серв�
    ▲            │
    │            ├─ тяжёлое → RabbitMQ → Celery-воркеры:
    │            │     ├─ scrape   (Playwright) → PostgreSQL   (по расписанию, Beat)
-   │            │     ├─ dewarp   (OpenCV/YOLO) → S3/MinIO
    │            │     ├─ match    (LLM-ранжирование) → результат
    │            │     └─ download (yt-dlp) → диск ──► api.files: /d/{token}
    │            │
@@ -55,7 +53,7 @@ Telegram → aiogram-бот ──HTTP──► FastAPI (REST-слой серв�
 ## Стек
 
 Python 3.13 · **uv** · aiogram 3 · FastAPI · SQLAlchemy 2.0 (async, asyncpg) + Alembic ·
-Celery + Beat · RabbitMQ (aio-pika) · Redis · MinIO/S3 (aioboto3) · Playwright · OpenCV/YOLO ·
+Celery + Beat · RabbitMQ (aio-pika) · Redis · Playwright ·
 yt-dlp + ffmpeg · LLM через OpenAI-совместимый API (Google Gemini по умолчанию,
 провайдер-агностично).
 
@@ -80,8 +78,8 @@ yt-dlp + ffmpeg · LLM через OpenAI-совместимый API (Google Gemi
 # 1. Зависимости
 uv sync
 
-# 2. Инфраструктура в Docker (Postgres на хост-порту 5433, Redis, RabbitMQ, MinIO)
-docker compose up -d postgres redis rabbitmq minio
+# 2. Инфраструктура в Docker (Postgres на хост-порту 5433, Redis, RabbitMQ)
+docker compose up -d postgres redis rabbitmq
 
 # 3. Конфигурация: создать .env из примера (-n не перезапишет существующий!) и
 #    заполнить TELEGRAM_BOT_TOKEN и LLM_API_KEY
@@ -112,7 +110,7 @@ kill $(ss -ltnp 2>/dev/null | grep :8000 | grep -oP 'pid=\K[0-9]+')
 
 - **Ключи** (`TELEGRAM_BOT_TOKEN`, `LLM_API_KEY`) — только в `.env` (в git не коммитится).
 - `LLM_API_KEY` бесплатно берётся в Google AI Studio (`aistudio.google.com`). Без ключа `/ask` и `/match` ответят «LLM не настроен», остальное работает.
-- **Воркер нужен** для `/dewarp`, `/match` и периодического скрапинга; бот сам обслуживает вакансии, `/stack`, `/ask` и навигацию.
+- **Воркер нужен** для `/match`, скачивания и периодического скрапинга; бот сам обслуживает вакансии, `/stack`, `/ask` и навигацию.
 - **Один бот на токен:** не запускай второй экземпляр с тем же токеном (в т.ч. docker-контейнер `bot`) параллельно локальному — Telegram отдаёт long-poll только одному (иначе `409 Conflict`).
 - **Скрап hh.ru** работает с российского IP; из-за границы/через VPN hh может отдавать заглушку (см. журнал).
 
@@ -130,8 +128,8 @@ kill $(ss -ltnp 2>/dev/null | grep :8000 | grep -oP 'pid=\K[0-9]+')
    `@userinfobot`). Пустое значение пускает всех, а бот умеет занимать диск и трафик:
    ссылку на скачивание присылает пользователь. `AllowlistMiddleware` стоит первым в
    цепочке, чтобы посторонний не доходил даже до rate-limit.
-2. **Порты инфраструктуры.** `docker-compose.yml` публикует Postgres, Redis, RabbitMQ и
-   MinIO на всех интерфейсах с паролями-заглушками (`vacancy:vacancy`, у Redis пароля нет
+2. **Порты инфраструктуры.** `docker-compose.yml` публикует Postgres, Redis и RabbitMQ
+   на всех интерфейсах с паролями-заглушками (`vacancy:vacancy`, у Redis пароля нет
    вовсе). Для машины в общей сети добавь префикс `127.0.0.1:` к портам и смени пароли.
    Учти: публикация портов docker'ом пишет правила в `nat/DOCKER` мимо `INPUT`, поэтому
    ufw такие порты **не закрывает**.
@@ -162,9 +160,9 @@ rate-limit (на фейк-Redis), хелперы `/match`, эндпоинт `GET
 ```
 bot/         aiogram: main (polling + notifier), registry, middlewares, navigation, help
 api/         FastAPI: main (/health + api_router сервисов), files (раздача по токену)
-core/        config, contracts (Infra/ServiceModule), db, redis, s3, celery, llm, tg_html, models, ratelimit
-services/    vacancy/ (скрапер, поиск, подписки, match), dewarp/ (алгоритм+задача),
-             ask/, download/ (formats, service, tasks)
+core/        config, contracts (Infra/ServiceModule), db, redis, celery, llm, tg_html, models, ratelimit
+services/    vacancy/ (скрапер, поиск, подписки, match), ask/,
+             download/ (formats, service, tasks)
 migrations/  Alembic
 tests/       оффлайн-набор (pytest)
 ```

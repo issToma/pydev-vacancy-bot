@@ -1,33 +1,24 @@
 [project]
 name = "vacancy-bot"
 version = "0.1.0"
-description = "Telegram-бот-гейтвей к бэкенд-сервисам: поиск вакансий со hh.ru, выпрямление фото документов, Q&A с LLM, скачивание видео по ссылке"
+description = "Telegram-бот-гейтвей к бэкенд-сервисам: поиск вакансий со hh.ru, Q&A с LLM, скачивание видео по ссылке"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = [
     "aio-pika>=9.6.2",
-    "aioboto3>=15.5.0",
     "aiogram>=3.28.2",
     "alembic>=1.18.4",
     "asyncpg>=0.31.0",
     "celery[redis]>=5.6.3",
     "fastapi>=0.136.3",
-    "matplotlib>=3.11.0",
-    "numpy>=2,<2.3",
     "openai>=2.44.0",
-    "opencv-contrib-python-headless>=4.13.0.92",
     "playwright>=1.61.0",
     "pydantic-settings>=2.14.1",
     "python-dateutil>=2.9.0.post0",
     "redis>=6.4.0",
-    "scipy>=1.18.0",
     "sqlalchemy[asyncio]>=2.0.50",
-    "torch>=2.2",
-    "torchvision>=0.17",
-    "tqdm>=4.68.3",
-    "ultralytics>=8.4.83",
     "uvicorn[standard]>=0.49.0",
     "yt-dlp>=2026.8.19",
 ]
@@ -38,16 +29,6 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
 ]
-
-# torch — CPU-сборка (деварпинг на CPU, CUDA не нужна): в разы меньше и быстрее.
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

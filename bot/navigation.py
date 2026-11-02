@@ -18,7 +18,6 @@ MENU_LABEL = "☰ Меню"
 # «разделы»; остальное (если появится) в меню не попадёт автоматически.
 SECTION_LABELS = {
     "vacancy": "📋 Вакансии",
-    "dewarp": "🖼 Dewarp",
     "ask": "🤖 Ask",
     "download": "⬇️ Скачать",
 }
@@ -90,7 +89,7 @@ def build_navigation_router(services: list[ServiceModule]) -> Router:
             reply_markup=_section_kb(service),
         )
         # опциональный хук: раздел с единственным действием сразу входит в свой режим
-        # (напр. Dewarp — ожидание изображения без промежуточной кнопки)
+        # (напр. «Скачать» — ожидание ссылки без промежуточной кнопки)
         on_enter = getattr(service, "on_enter", None)
         if on_enter is not None:
             await on_enter(message, state)

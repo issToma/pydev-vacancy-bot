@@ -5,11 +5,9 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
-from botocore.exceptions import BotoCoreError
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import BufferedInputFile, FSInputFile
+from aiogram.types import FSInputFile
 
-from core import s3
 
 from bot.help import build_help_router
 from bot.middlewares import (
@@ -23,7 +21,6 @@ from bot.registry import SERVICES, validate_registry
 from core.config import settings
 from core.infra import build_infra
 from core.tg_html import HTML_SOURCE_LIMIT, TELEGRAM_TEXT_LIMIT, to_telegram_html
-from services.dewarp.service import build_result_kb
 from services.vacancy.notifications import run_notifier_supervised
 
 logging.basicConfig(level=logging.INFO)
@@ -35,8 +32,8 @@ async def _startup_call(
 ):
     """Стартовый сетевой вызов с ретраями и экспоненциальным бэкоффом.
 
-    До start_polling любой внешний запрос (Telegram set_my_commands, MinIO
-    ensure_buckets) при кратковременном сетевом блипе роняет процесс целиком. Long
+    До start_polling любой внешний запрос (Telegram set_my_commands) при
+    кратковременном сетевом блипе роняет процесс целиком. Long
     polling обрывы после старта переживает сам — а вот эти до-polling вызовы нет,
     поэтому оборачиваем их. Ретраим только сетевые ошибки из `errors` (не логические:
     напр. S3 ClientError — это валидный ответ, его пробрасываем сразу).
@@ -169,7 +166,7 @@ def build_dispatcher() -> Dispatcher:
     )
     # DI: infra доступна во всех хендлерах через data["infra"]
     dp.message.middleware(InfraMiddleware(infra))
-    # смена намерения: другая команда снимает ожидание ввода (/dewarp, /match)
+    # смена намерения: другая команда снимает ожидание ввода (/match, ссылка на видео)
     dp.message.middleware(FlowStateGuardMiddleware())
 
     # навигация (главное меню + разделы) — включаем первой: ловит /start, /menu,
@@ -191,9 +188,6 @@ async def main() -> None:
     bot = Bot(token=settings.telegram_bot_token)
     dp = build_dispatcher()
 
-    # S3-бакеты для Dewarp (idempotent) — чтобы на свежем MinIO загрузка не падала.
-    await _startup_call(s3.ensure_buckets, what="ensure_buckets", errors=(BotoCoreError,))
-
     # Глобальное /-меню по умолчанию — пустое: на главном уровне навигация идёт
     # reply-клавиатурой, а команды раздела навигация выставляет per-chat при входе.
     await _startup_call(
@@ -202,7 +196,7 @@ async def main() -> None:
     )
 
     # Прямой RabbitMQ-consumer уведомлений — фоновой задачей внутри бота.
-    # deliver решает, как доставить payload: текст (подписки) или фото из S3 (dewarp).
+    # deliver решает, как доставить payload: текст (подписки) или готовый файл (скачивание).
     # Ошибки доставки → DLQ (см. notifications.py).
     async def deliver(payload: dict) -> None:
         user_id = payload["user_id"]
@@ -222,15 +216,6 @@ async def main() -> None:
             # готовая загрузка, влезающая в лимит Bot API (48 МБ): отдаём файлом,
             # чтобы смотреть/слушать можно было из любой сети, а не только дома
             await _send_media(bot, payload)
-        elif payload.get("photo_key"):
-            data = await s3.get_object(payload["photo_bucket"], payload["photo_key"])
-            # по умолчанию — фото (превью в чате) + кнопка получить полное качество файлом
-            await bot.send_photo(
-                user_id,
-                BufferedInputFile(data, filename="dewarped.jpg"),
-                caption=payload.get("caption", ""),
-                reply_markup=build_result_kb(payload["photo_key"]),
-            )
         else:
             text = payload["text"]
             # рендерим Markdown→Telegram-HTML (для /match и т.п.); при сбое парсинга — plain
