@@ -19,7 +19,6 @@ MENU_LABEL = "☰ Меню"
 SECTION_LABELS = {
     "vacancy": "📋 Вакансии",
     "ask": "🤖 Ask",
-    "download": "⬇️ Скачать",
 }
 
 
