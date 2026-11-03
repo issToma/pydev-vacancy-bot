@@ -94,7 +94,7 @@ uv run alembic upgrade head
 
 # 5. Запустить в двух отдельных терминалах — бот и воркер:
 uv run python -m bot.main                                        # бот (long polling)
-uv run celery -A core.celery_app:celery_app worker -B -l info    # воркер + Beat (задачи, скрап)
+uv run celery -A core.celery_app:celery_app worker -B -l info -n vacancy@%h   # воркер + Beat
 ```
 
 REST-слой FastAPI **поднимать не обязательно** — бот ходит в инфраструктуру напрямую, а не через HTTP. Если нужен API/`/health` или **Swagger UI**:

@@ -32,6 +32,9 @@ uv run alembic upgrade head
 
 echo ">> Бот + воркер (Ctrl+C — остановить всё)…"
 trap 'kill 0' EXIT                                   # на выходе гасим все фоновые задачи
-uv run celery -A core.celery_app:celery_app worker -B -l info &
+# -n: своё имя узла. Брокер общий с другими ботами, а по умолчанию воркер
+# называется celery@<хост> — одинаково у всех. Тогда управляющие команды
+# (celery inspect/control) уходят в общий pidbox и отвечает кто попало.
+uv run celery -A core.celery_app:celery_app worker -B -l info -n vacancy@%h &
 uv run python -m bot.main &
 wait
