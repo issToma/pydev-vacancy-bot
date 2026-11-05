@@ -51,7 +51,7 @@ class Job(Base):
     kind: Mapped[str] = mapped_column(Text)             # "scrape" | "match" | ...
     status: Mapped[str] = mapped_column(Text, server_default=text("'queued'"))  # queued/running/done/failed
     params: Mapped[dict | None] = mapped_column(JSONB)
-    result_ref: Mapped[str | None] = mapped_column(Text)  # S3-ключ результата
+    result_ref: Mapped[str | None] = mapped_column(Text)  # ссылка на результат
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=text("now()"))
     updated_at: Mapped[datetime.datetime] = mapped_column(
         server_default=text("now()"), onupdate=datetime.datetime.utcnow

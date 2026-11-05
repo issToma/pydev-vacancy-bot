@@ -24,7 +24,7 @@ services:
       POSTGRES_PASSWORD: vacancy
       POSTGRES_DB: vacancy
     ports:
-      - "5433:5432"          # 5433 на хосте: 5432 занят TomaDB/autonsi
+      - "5433:5432"          # 5433 на хосте: 5432 занят другим проектом
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -100,10 +100,11 @@ services:
       rabbitmq: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
 
-  # Celery-воркер + встроенный Beat (scrape по расписанию, скачивание, match)
+  # Celery-воркер + встроенный Beat (scrape по расписанию, match).
+  # -n: своё имя узла — брокер общий с другими ботами (см. run.sh).
   worker:
     build: .
-    command: uv run celery -A core.celery_app:celery_app worker -B -l info
+    command: uv run celery -A core.celery_app:celery_app worker -B -l info -n vacancy@%h
     env_file: .env
     environment:
       <<: *app-env
