@@ -94,7 +94,7 @@ class AskService:
     """
 
     name = "ask"
-    BTN_ASK = "🤖 Задать вопрос"
+    BTN_ASK = "🤖 Спросить у ИИ"
     BTN_USAGE = "📊 Мой расход"
     menu_buttons = [BTN_ASK, BTN_USAGE]
     commands = [
@@ -102,7 +102,7 @@ class AskService:
         BotCommand(command="usage", description="мой расход токенов LLM за сутки"),
     ]
     help_text = (
-        "🤖 Задать вопрос — точечный вопрос по программированию (в стиле StackOverflow); "
+        "🤖 Спросить у ИИ — точечный вопрос по программированию (в стиле StackOverflow); "
         "помнит контекст последних реплик, можно уточнять.\n"
         "📊 Мой расход — сколько токенов LLM ты потратил за сутки."
     )

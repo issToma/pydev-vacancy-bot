@@ -18,7 +18,16 @@ MENU_LABEL = "☰ Меню"
 # «разделы»; остальное (если появится) в меню не попадёт автоматически.
 SECTION_LABELS = {
     "vacancy": "📋 Вакансии",
-    "ask": "🤖 Ask",
+}
+
+# Раздел → из каких сервисов собирать кнопки. Ask отдельным разделом не окупался:
+# два действия на целый экран, и ради них лишний переход по меню. Теперь он живёт
+# кнопкой внутри раздела вакансий.
+#
+# Состав кнопок знает навигация, а не сервис: иначе сервису вакансий пришлось бы
+# импортировать сервис Ask, и они перестали бы быть независимыми.
+SECTION_SERVICES = {
+    "vacancy": ["vacancy", "ask"],
 }
 
 
@@ -32,12 +41,27 @@ def _main_kb(services: list[ServiceModule]) -> ReplyKeyboardMarkup:
     )
 
 
-def _section_kb(service: ServiceModule) -> ReplyKeyboardMarkup:
-    # кнопки = понятные ярлыки действий раздела (их обрабатывают сами сервисы)
-    buttons = [KeyboardButton(text=label) for label in service.menu_buttons]
+def _section_labels(section: str, services: list[ServiceModule]) -> list[str]:
+    """Ярлыки кнопок раздела: свои плюс добавленные из SECTION_SERVICES."""
+    wanted = SECTION_SERVICES.get(section, [section])
+    by_name = {s.name: s for s in services}
+    return [label for name in wanted if name in by_name for label in by_name[name].menu_buttons]
+
+
+def _section_kb(section: str, services: list[ServiceModule]) -> ReplyKeyboardMarkup:
+    # кнопки = понятные ярлыки действий (их обрабатывают сами сервисы по тексту,
+    # независимо от того, в каком разделе нажали)
+    buttons = [KeyboardButton(text=label) for label in _section_labels(section, services)]
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]   # по 2 в ряд
     rows.append([KeyboardButton(text=MENU_LABEL)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+def _section_help(section: str, services: list[ServiceModule]) -> str:
+    """Подсказка раздела: справки всех сервисов, чьи кнопки в нём показаны."""
+    wanted = SECTION_SERVICES.get(section, [section])
+    by_name = {s.name: s for s in services}
+    return "\n".join(by_name[name].help_text for name in wanted if name in by_name)
 
 
 def build_navigation_router(services: list[ServiceModule]) -> Router:
@@ -46,8 +70,32 @@ def build_navigation_router(services: list[ServiceModule]) -> Router:
     router = Router(name="navigation")
     by_label = {SECTION_LABELS[s.name]: s for s in services if s.name in SECTION_LABELS}
     main_kb = _main_kb(services)
+    # Разделов может остаться один (сейчас так: вакансии, внутри которых и Ask).
+    # Тогда «главное меню» из одной кнопки — лишний переход, и мы сразу открываем
+    # сам раздел. Код ветвится, а не выпиливается: появится второй раздел —
+    # двухуровневая навигация вернётся сама.
+    only_section = next(iter(by_label.values())) if len(by_label) == 1 else None
+
+    async def open_section(message: Message, state: FSMContext, service: ServiceModule) -> None:
+        await state.clear()
+        # /-меню делаем пустым: действия — на reply-клавиатуре (кнопки-слова)
+        await message.bot.set_my_commands(
+            [], scope=BotCommandScopeChat(chat_id=message.chat.id)
+        )
+        await message.answer(
+            f"Раздел «{SECTION_LABELS[service.name]}».\n\n"
+            f"{_section_help(service.name, services)}",
+            reply_markup=_section_kb(service.name, services),
+        )
+        # опциональный хук: раздел с единственным действием сразу входит в свой режим
+        on_enter = getattr(service, "on_enter", None)
+        if on_enter is not None:
+            await on_enter(message, state)
 
     async def show_main(message: Message, state: FSMContext) -> None:
+        if only_section is not None:
+            await open_section(message, state, only_section)
+            return
         await state.clear()                                   # сброс любого начатого флоу
         # на главном уровне /-меню пустое: навигация идёт reply-клавиатурой,
         # одинокая команда там не нужна. Команды появляются внутри разделов.
@@ -59,7 +107,8 @@ def build_navigation_router(services: list[ServiceModule]) -> Router:
     @router.message(CommandStart())
     async def start(message: Message, state: FSMContext) -> None:
         await message.answer(
-            "Привет! Я vacancy-bot: вакансии, выпрямление документов и Q&A по разработке."
+            "Привет! Я vacancy-bot: поиск и аналитика вакансий, подбор по резюме "
+            "и вопросы к ИИ по разработке."
         )
         await show_main(message, state)
 
@@ -77,21 +126,7 @@ def build_navigation_router(services: list[ServiceModule]) -> Router:
 
     @router.message(F.text.in_(set(by_label)))
     async def enter_section(message: Message, state: FSMContext) -> None:
-        await state.clear()
-        service = by_label[message.text]
-        # /-меню раздела делаем пустым: действия — на reply-клавиатуре (кнопки-слова)
-        await message.bot.set_my_commands(
-            [], scope=BotCommandScopeChat(chat_id=message.chat.id)
-        )
-        await message.answer(
-            f"Раздел «{SECTION_LABELS[service.name]}».\n\n{service.help_text}",
-            reply_markup=_section_kb(service),
-        )
-        # опциональный хук: раздел с единственным действием сразу входит в свой режим
-        # (напр. «Скачать» — ожидание ссылки без промежуточной кнопки)
-        on_enter = getattr(service, "on_enter", None)
-        if on_enter is not None:
-            await on_enter(message, state)
+        await open_section(message, state, by_label[message.text])
 
     return router
 
