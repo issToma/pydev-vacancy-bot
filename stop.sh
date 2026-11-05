@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Остановить весь проект: бот и воркер (если запущены) и инфра-контейнеры.
-# Инфра останавливается через docker compose stop — контейнеры остаются выключенными
-# (в т.ч. после перезагрузки), пока снова не запустишь ./run.sh
+# Остановить бот и воркер (если запущены).
+#
+# Инфра-контейнеры НЕ трогаем намеренно: compose-проект infra общий с media-ботом,
+# и остановка Postgres отсюда уронила бы его. Когда инфра точно никому не нужна:
+#   sudo docker compose stop postgres redis rabbitmq
 #
 # Использование:  ./stop.sh
 set -uo pipefail
@@ -13,7 +15,4 @@ pkill -f "python -m bot.main" 2>/dev/null && echo "   бот остановле�
 # у media-бота, и шаблон без -n гасил бы заодно его воркер.
 pkill -f "celery -A core.celery_app.*-n vacancy@" 2>/dev/null && echo "   воркер остановлен" || echo "   воркер не запущен"
 
-echo ">> Останавливаю инфру (docker)…"
-sudo docker compose stop postgres redis rabbitmq
-
-echo ">> Готово — всё остановлено."
+echo ">> Готово. Инфраструктура продолжает работать (она общая)."

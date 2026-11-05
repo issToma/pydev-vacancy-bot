@@ -117,4 +117,10 @@ services:
       migrate: {condition: service_completed_successfully}
 
 volumes:
+  # Данные Postgres всех ботов. Том создан ещё под старым именем проекта
+  # (vacancy_bot), поэтому имя задано явно. external — compose не создаст пустой
+  # том взамен, если этого нет, а откажется стартовать: пустая база под видом
+  # рабочей хуже честной ошибки. Блок обязан совпадать во всех ботах.
   pgdata:
+    name: vacancy_bot_pgdata
+    external: true
