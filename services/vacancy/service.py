@@ -35,6 +35,12 @@ from services.vacancy.repo import (
     search_vacancies,
     top_technologies,
 )
+from services.vacancy.ask import (
+    ASK_BUTTONS,
+    ASK_COMMANDS,
+    ASK_HELP,
+    register_ask,
+)
 from services.vacancy.fx import get_fx_rates
 from services.vacancy.salary_stats import (
     GRADE_NON_DEV,
@@ -132,7 +138,12 @@ class VacancyService:
     BTN_SUBSCRIBE = "🔔 Подписаться"
     BTN_SUBS = "📜 Мои подписки"
     BTN_MATCH = "🎯 Подбор по резюме"
-    menu_buttons = [BTN_SEARCH, BTN_FILTER, BTN_STACK, BTN_SALARY, BTN_SUBSCRIBE, BTN_SUBS, BTN_MATCH]
+    # Ask живёт внутри этого сервиса (см. services/vacancy/ask.py), поэтому его
+    # кнопки и команды просто дописываются к нашим.
+    menu_buttons = [
+        BTN_SEARCH, BTN_FILTER, BTN_STACK, BTN_SALARY, BTN_SUBSCRIBE, BTN_SUBS,
+        BTN_MATCH, *ASK_BUTTONS,
+    ]
 
     # команды (работают по вводу; в /-меню не показываем — навигация кнопками)
     commands = [
@@ -143,16 +154,20 @@ class VacancyService:
         BotCommand(command="subscribe", description="подписка на новые вакансии"),
         BotCommand(command="subscriptions", description="мои подписки"),
         BotCommand(command="match", description="подбор вакансий по резюме (LLM)"),
+        *ASK_COMMANDS,
     ]
     help_text = (
         "🔎 Поиск — вакансии по названию · 🎛 Фильтры — регион/формат/аккредитация\n"
-        "📊 Топ стек — востребованные технологии · 💰 Зарплаты — средняя/медиана по грейдам\n"
+        "📊 Топ стек — востребованные технологии\n"
+        "💰 Зарплаты по грейдам — средняя и медианная\n"
         "🔔 Подписаться — уведомления о новых · 📜 Мои подписки — список/удаление\n"
-        "🎯 Подбор по резюме — подбор через LLM"
+        "🎯 Подбор по резюме — подбор через LLM\n"
+        + ASK_HELP
     )
 
     def register(self, router: Router, infra: Infra) -> None:
         register_filter_dialog(router, infra, self.BTN_FILTER)
+        register_ask(router, infra)
 
         # ── общая логика (переиспользуется командой и кнопкой) ──
         async def _show_vacancies(message: Message, query: str | None) -> None:

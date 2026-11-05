@@ -1,52 +1,49 @@
-"""Навигация: состав разделов согласован с реестром сервисов.
+"""Навигация и состав раздела.
 
-Ask живёт кнопкой внутри раздела вакансий, а не отдельным разделом, поэтому
-состав кнопок знает навигация. Легко опечататься в имени сервиса или оставить на
-клавиатуре кнопку, которую никто не обрабатывает — тесты ровно про это.
+Ask сращён с сервисом вакансий (services/vacancy/ask.py), отдельным ServiceModule
+он больше не является. Тесты следят за тем, что его кнопки, команды и справка не
+потерялись при сращивании, и что на клавиатуре нет кнопок-пустышек.
 """
-from bot.navigation import (
-    MENU_LABEL,
-    SECTION_LABELS,
-    SECTION_SERVICES,
-    _section_kb,
-    _section_labels,
-)
+from bot.navigation import MENU_LABEL, SECTION_LABELS, _main_kb, _section_kb
 from bot.registry import SERVICES
+from services.vacancy.ask import ASK_BUTTONS, ASK_COMMANDS, ASK_HELP
 
-NAMES = {s.name for s in SERVICES}
-
-
-def test_sections_reference_existing_services() -> None:
-    assert set(SECTION_LABELS) <= NAMES, "раздел ссылается на несуществующий сервис"
-    assert set(SECTION_SERVICES) <= NAMES
-    for section, members in SECTION_SERVICES.items():
-        assert set(members) <= NAMES, f"раздел {section}: неизвестные сервисы"
+VACANCY = next(s for s in SERVICES if s.name == "vacancy")
 
 
-def test_every_button_belongs_to_some_service() -> None:
-    """Кнопка, которой нет ни у одного сервиса, на нажатие ничего не сделает."""
-    known = {label for s in SERVICES for label in s.menu_buttons}
-    for section in SECTION_LABELS:
-        for label in _section_labels(section, SERVICES):
-            assert label in known, f"кнопку «{label}» никто не обрабатывает"
+def test_single_service_registry() -> None:
+    assert [s.name for s in SERVICES] == ["vacancy"], "сервис в проекте один"
+    assert set(SECTION_LABELS) == {"vacancy"}
 
 
-def test_labels_are_unique_within_section() -> None:
-    """Две одинаковые кнопки = два хендлера на один текст, сработает случайный."""
-    for section in SECTION_LABELS:
-        labels = _section_labels(section, SERVICES)
-        assert len(labels) == len(set(labels)), f"раздел {section}: повторы кнопок"
+def test_ask_is_part_of_vacancy_service() -> None:
+    """То, ради чего сращивали: Ask доступен из раздела вакансий."""
+    assert set(ASK_BUTTONS) <= set(VACANCY.menu_buttons)
+    commands = {c.command for c in VACANCY.commands}
+    assert {c.command for c in ASK_COMMANDS} <= commands
 
 
-def test_ask_buttons_are_inside_vacancy_section() -> None:
-    """Собственно то, ради чего всё это: Ask доступен из раздела вакансий."""
-    labels = _section_labels("vacancy", SERVICES)
-    ask = next(s for s in SERVICES if s.name == "ask")
-    assert set(ask.menu_buttons) <= set(labels)
-    assert "ask" not in SECTION_LABELS, "Ask не должен быть отдельным разделом"
+def test_help_mentions_every_button() -> None:
+    """Кнопка без строки в справке — признак, что её забыли описать."""
+    for label in VACANCY.menu_buttons:
+        assert label in VACANCY.help_text, f"кнопка «{label}» не описана в справке"
+    assert ASK_HELP in VACANCY.help_text
 
 
-def test_keyboard_has_exit_button() -> None:
-    rows = _section_kb("vacancy", SERVICES).keyboard
-    assert rows[-1][0].text == MENU_LABEL, "последняя кнопка — выход/сброс"
+def test_buttons_are_unique() -> None:
+    """Повтор ярлыка = два хендлера на один текст, сработает случайный."""
+    labels = VACANCY.menu_buttons
+    assert len(labels) == len(set(labels))
+
+
+def test_section_keyboard_layout() -> None:
+    rows = _section_kb(VACANCY).keyboard
+    flat = [b.text for row in rows for b in row]
+    assert flat[:-1] == list(VACANCY.menu_buttons), "кнопки раздела идут как объявлены"
+    assert flat[-1] == MENU_LABEL, "последняя кнопка — выход/сброс"
     assert all(len(row) <= 2 for row in rows), "по две кнопки в ряд"
+
+
+def test_main_keyboard_has_every_section() -> None:
+    labels = {b.text for row in _main_kb(SERVICES).keyboard for b in row}
+    assert labels == set(SECTION_LABELS.values())

@@ -20,16 +20,6 @@ SECTION_LABELS = {
     "vacancy": "📋 Вакансии",
 }
 
-# Раздел → из каких сервисов собирать кнопки. Ask отдельным разделом не окупался:
-# два действия на целый экран, и ради них лишний переход по меню. Теперь он живёт
-# кнопкой внутри раздела вакансий.
-#
-# Состав кнопок знает навигация, а не сервис: иначе сервису вакансий пришлось бы
-# импортировать сервис Ask, и они перестали бы быть независимыми.
-SECTION_SERVICES = {
-    "vacancy": ["vacancy", "ask"],
-}
-
 
 def _main_kb(services: list[ServiceModule]) -> ReplyKeyboardMarkup:
     rows = [
@@ -41,27 +31,12 @@ def _main_kb(services: list[ServiceModule]) -> ReplyKeyboardMarkup:
     )
 
 
-def _section_labels(section: str, services: list[ServiceModule]) -> list[str]:
-    """Ярлыки кнопок раздела: свои плюс добавленные из SECTION_SERVICES."""
-    wanted = SECTION_SERVICES.get(section, [section])
-    by_name = {s.name: s for s in services}
-    return [label for name in wanted if name in by_name for label in by_name[name].menu_buttons]
-
-
-def _section_kb(section: str, services: list[ServiceModule]) -> ReplyKeyboardMarkup:
-    # кнопки = понятные ярлыки действий (их обрабатывают сами сервисы по тексту,
-    # независимо от того, в каком разделе нажали)
-    buttons = [KeyboardButton(text=label) for label in _section_labels(section, services)]
+def _section_kb(service: ServiceModule) -> ReplyKeyboardMarkup:
+    # кнопки = понятные ярлыки действий раздела (их обрабатывают сами сервисы)
+    buttons = [KeyboardButton(text=label) for label in service.menu_buttons]
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]   # по 2 в ряд
     rows.append([KeyboardButton(text=MENU_LABEL)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
-
-
-def _section_help(section: str, services: list[ServiceModule]) -> str:
-    """Подсказка раздела: справки всех сервисов, чьи кнопки в нём показаны."""
-    wanted = SECTION_SERVICES.get(section, [section])
-    by_name = {s.name: s for s in services}
-    return "\n".join(by_name[name].help_text for name in wanted if name in by_name)
 
 
 def build_navigation_router(services: list[ServiceModule]) -> Router:
@@ -83,9 +58,8 @@ def build_navigation_router(services: list[ServiceModule]) -> Router:
             [], scope=BotCommandScopeChat(chat_id=message.chat.id)
         )
         await message.answer(
-            f"Раздел «{SECTION_LABELS[service.name]}».\n\n"
-            f"{_section_help(service.name, services)}",
-            reply_markup=_section_kb(service.name, services),
+            f"Раздел «{SECTION_LABELS[service.name]}».\n\n{service.help_text}",
+            reply_markup=_section_kb(service),
         )
         # опциональный хук: раздел с единственным действием сразу входит в свой режим
         on_enter = getattr(service, "on_enter", None)
