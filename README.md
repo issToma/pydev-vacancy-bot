@@ -1,8 +1,5 @@
 # vacancy_bot
 
-<!-- Бейдж заработает после привязки к GitHub: замени OWNER на свой логин. -->
-[![tests](https://github.com/OWNER/vacancy_bot/actions/workflows/tests.yml/badge.svg)](https://github.com/OWNER/vacancy_bot/actions/workflows/tests.yml)
-
 Telegram-бот для поиска и аналитики вакансий с hh.ru. Скрапер на Playwright собирает
 вакансии в PostgreSQL; бот даёт по ним поиск с фильтрами, статистику зарплат, подписки
 с уведомлениями, подбор по резюме через LLM и ответы на вопросы по программированию.
